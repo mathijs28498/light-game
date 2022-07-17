@@ -21,8 +21,20 @@ use nalgebra_glm as glm;
 
 pub const WIDTH: u32 = 480;
 pub const HEIGHT: u32 = 480;
-pub const BUFFER_SIZE: usize = (WIDTH * 4) as usize;
+pub const BUFFER_SIZE: usize = (WIDTH * HEIGHT * 4) as usize;
 pub const WORK_GROUP_SIZE: i32 = WIDTH as i32 * HEIGHT as i32 / 256;
+
+pub struct PushConstants{
+    time_passed: f32,
+    width: u32, 
+    height: u32,
+}
+
+impl PushConstants {
+    pub fn new(time_passed: f32, width: u32, height: u32,) -> Self {
+        PushConstants { time_passed, width, height }
+    }
+}
 
 pub struct ComputeDevice {
     device: Option<Arc<Device>>,
@@ -149,7 +161,7 @@ impl ComputeDevice {
         self.set = Some(set);
     }
 
-    pub fn execute(&mut self) {
+    pub fn execute(&mut self, push_constants: PushConstants) {
         let mut builder = AutoCommandBufferBuilder::primary(
             self.device.as_ref().unwrap().clone(),
             self.queue.as_ref().unwrap().family(),
@@ -165,11 +177,11 @@ impl ComputeDevice {
                 0,
                 self.set.as_ref().unwrap().clone(),
             )
-            // .push_constants(
-            //     self.pipeline.as_ref().unwrap().layout().clone(),
-            //     0,
-            //     push_constants,
-            // )
+            .push_constants(
+                self.pipeline.as_ref().unwrap().layout().clone(),
+                0,
+                push_constants,
+            )
             .dispatch([WORK_GROUP_SIZE as u32, 1, 1])
             .unwrap();
 
@@ -196,7 +208,7 @@ impl ComputeDevice {
         true
     }
 
-    pub fn fill_u8(&self) -> Result<&[u8; BUFFER_SIZE], &str> {
+    pub fn fill_u8(&self, buffer_to_fill: &mut [u8]) -> Result<(), &str> {
         let buffer = match self.buffer_u32.as_ref() {
             Some(b) => b,
             None => return Err("Command has never executed, so buffer is None"),
@@ -204,11 +216,8 @@ impl ComputeDevice {
 
         let mut last_index = 0;
 
-        let res: &[u8; BUFFER_SIZE] = buffer
-            .as_bytes()
-            .try_into()
-            .expect("Failed to turn slice into full length");
+        buffer_to_fill.clone_from_slice(buffer.as_bytes());
 
-        Ok(res)
+        Ok(())
     }
 }

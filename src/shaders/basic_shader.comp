@@ -5,9 +5,16 @@ layout(set = 0, binding = 0) buffer Data {
     uint data[];
 } data;
 
+layout(push_constant) uniform PushConstantData {
+    float time_passed;
+    uint width, height;
+} pc;
+
 #define PI 3.1415926538
 #define FLT_MAX 3.402823466e+38
 #define FLT_MIN 1.175494351e-38
+
+vec2 playerPos = vec2(25., 25.);
 
 void set_color(vec3 col) {
     uint idx = gl_GlobalInvocationID.x;
@@ -17,6 +24,17 @@ void set_color(vec3 col) {
 
 void main() {
     uint idx = gl_GlobalInvocationID.x;
-    vec3 col = vec3(1., 0., 0.);
+    uint x = idx % pc.width;
+    uint y = idx / pc.width;
+    vec2 p = vec2(float(x) / float(pc.width), float(y) / float(pc.height));
+    vec2 playerPosPerc = vec2(playerPos.x / pc.width, playerPos.y / pc.height);
+
+    vec2 playerPosDir = p - playerPosPerc;
+    float playerDist = length(playerPosDir);
+
+    float value = 1. - clamp(pow(playerDist, 0.1), 0., 1.);
+
+
+    vec3 col = vec3(value, 0., 0.);
     set_color(col);
 }

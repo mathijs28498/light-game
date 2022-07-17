@@ -12,7 +12,7 @@ use rand::prelude::*;
 
 mod vulkano_backend;
 use vulkano::pipeline::compute;
-use vulkano_backend::compute_device::{WIDTH, HEIGHT, BUFFER_SIZE, self, ComputeDevice};
+use vulkano_backend::compute_device::{WIDTH, HEIGHT, BUFFER_SIZE, self, ComputeDevice, PushConstants};
 
 use rand::Rng;
 
@@ -93,13 +93,20 @@ fn draw_objects_system(
 ) {
 
 
-    let frame = pixels_resource.pixels.get_frame();
-    compute_device.execute();
+    let frame: &mut[u8] = pixels_resource.pixels.get_frame();
+    compute_device.execute(
+        PushConstants::new(
+            0.,
+            WIDTH,
+            HEIGHT
+        )
+    );
     compute_device.await_future();
-    let frame_buffer = compute_device.fill_u8().unwrap();
-    for (i, pix) in frame_buffer.iter().enumerate() {
-        frame[i] = *pix;
-    }
+    compute_device.fill_u8(frame).unwrap();
+    // *frame = frame_buffer.clone().try_into();
+    // for (i, pix) in frame_buffer.iter().enumerate() {
+    //     frame[i] = *pix;
+    // }
 }
 
 fn get_sq_dist(v0: &Vector3<f32>, v1: &Vector3<f32>) -> f32 {
