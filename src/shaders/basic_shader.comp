@@ -1,0 +1,22 @@
+#version 450
+layout(local_size_x = 256) in;
+
+layout(set = 0, binding = 0) buffer Data {
+    uint data[];
+} data;
+
+#define PI 3.1415926538
+#define FLT_MAX 3.402823466e+38
+#define FLT_MIN 1.175494351e-38
+
+void set_color(vec3 col) {
+    uint idx = gl_GlobalInvocationID.x;
+    col *= 255.;
+    data.data[idx] = (uint(col.r) & 0xFF) | ((uint(col.g) & 0xFF) << 8) | ((uint(col.b) & 0xFF) << 16) | (0xFF << 24);
+}
+
+void main() {
+    uint idx = gl_GlobalInvocationID.x;
+    vec3 col = vec3(1., 0., 0.);
+    set_color(col);
+}
