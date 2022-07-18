@@ -5,17 +5,24 @@
 
 #![allow(unused_imports)]
 
-use bevy::{app::AppExit, prelude::*, window::WindowResizeConstraints, input::mouse::MouseMotion};
+use bevy::{
+    app::AppExit,
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    input::mouse::MouseMotion,
+    prelude::*,
+    window::WindowResizeConstraints,
+};
 use bevy_pixels::prelude::*;
 use nalgebra::*;
 use rand::prelude::*;
 
 mod vulkano_backend;
 use vulkano::pipeline::compute;
-use vulkano_backend::compute_device::{WIDTH, HEIGHT, BUFFER_SIZE, self, ComputeDevice, PushConstants};
+use vulkano_backend::compute_device::{
+    self, ComputeDevice, PushConstants, BUFFER_SIZE, HEIGHT, WIDTH,
+};
 
 use rand::Rng;
-
 
 // #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 // enum AppStage {
@@ -40,12 +47,8 @@ fn main() {
             },
             ..Default::default()
         })
-        .insert_resource(
-            compute_device::ComputeDevice::new()
-        )
-        .insert_resource(
-            MousePos{pos: [0.;2]}
-        )
+        .insert_resource(compute_device::ComputeDevice::new())
+        .insert_resource(MousePos { pos: [0.; 2] })
         // .insert_resource(GameObjects {
         //     balls: vec![
         //         Ball::new(Vector3::new(200., 200., 10.), 50., [255, 0, 0, 255]),
@@ -59,6 +62,8 @@ fn main() {
         .add_startup_system(init_compute_device)
         .add_plugins(DefaultPlugins)
         .add_plugin(PixelsPlugin)
+        .add_plugin(FrameTimeDiagnosticsPlugin::default())
+        .add_plugin(LogDiagnosticsPlugin::default())
         .add_system(exit_on_escape)
         .add_system(get_mouse_pos)
         // .add_stage_after(
@@ -77,32 +82,21 @@ fn main() {
         .run();
 }
 
-fn get_mouse_pos(
-    windows: Res<Windows>,
-    mut mouse_pos: ResMut<MousePos>,
-) {
+fn get_mouse_pos(windows: Res<Windows>, mut mouse_pos: ResMut<MousePos>) {
     let window = windows.get_primary().unwrap();
 
     if let Some(mouse_pos_) = window.cursor_position() {
-        mouse_pos.pos = [
-            mouse_pos_.x,
-            HEIGHT as f32 - mouse_pos_.y,
-        ]
+        mouse_pos.pos = [mouse_pos_.x, HEIGHT as f32 - mouse_pos_.y]
     }
 }
 
-fn exit_on_escape(
-    keyboard_input: Res<Input<KeyCode>>,
-    mut app_exit_events: EventWriter<AppExit>,
-) {
+fn exit_on_escape(keyboard_input: Res<Input<KeyCode>>, mut app_exit_events: EventWriter<AppExit>) {
     if keyboard_input.just_pressed(KeyCode::Escape) {
         app_exit_events.send(AppExit);
     }
 }
 
-fn init_compute_device(
-    mut compute_device: ResMut<ComputeDevice>
-) {
+fn init_compute_device(mut compute_device: ResMut<ComputeDevice>) {
     compute_device.init();
     compute_device.create_buffers();
     compute_device.create_pipeline();
@@ -114,18 +108,14 @@ fn draw_objects(
     // game_objects: Res<GameObjects>,
     mouse_pos: Res<MousePos>,
 ) {
-
-
-    let frame: &mut[u8] = pixels_resource.pixels.get_frame();
-    compute_device.execute(
-        PushConstants::new(
-            0.,
-            WIDTH,
-            HEIGHT,
-            mouse_pos.pos[0],
-            mouse_pos.pos[1],
-        )
-    );
+    let frame: &mut [u8] = pixels_resource.pixels.get_frame();
+    compute_device.execute(PushConstants::new(
+        0.,
+        WIDTH,
+        HEIGHT,
+        mouse_pos.pos[0],
+        mouse_pos.pos[1],
+    ));
     compute_device.await_future();
     compute_device.fill_u8(frame).unwrap();
     // *frame = frame_buffer.clone().try_into();
