@@ -8,6 +8,7 @@ layout(set = 0, binding = 0) buffer Data {
 layout(push_constant) uniform PushConstantData {
     float time_passed;
     uint width, height;
+    float mouseX, mouseY;
 } pc;
 
 #define PI 3.1415926538
@@ -26,11 +27,12 @@ void main() {
     uint idx = gl_GlobalInvocationID.x;
     uint x = idx % pc.width;
     uint y = idx / pc.width;
+    vec2 point = vec2(x, y);
     vec2 p = vec2(float(x) / float(pc.width), float(y) / float(pc.height));
-    vec2 playerPosPerc = vec2(playerPos.x / pc.width, playerPos.y / pc.height);
+    // vec2 playerPosPerc = vec2(playerPos.x / pc.width, playerPos.y / pc.height);
 
-    vec2 playerPosDir = p - playerPosPerc;
-    float playerDist = length(playerPosDir);
+    vec2 playerPosDir = point - vec2(pc.mouseX, pc.mouseY);
+    float playerDist = length(playerPosDir) * 0.005;
 
     float value = 1. - clamp(pow(playerDist, 0.1), 0., 1.);
 

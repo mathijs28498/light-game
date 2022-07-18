@@ -28,11 +28,13 @@ pub struct PushConstants{
     time_passed: f32,
     width: u32, 
     height: u32,
+    mouse_x: f32,
+    mouse_y: f32,
 }
 
 impl PushConstants {
-    pub fn new(time_passed: f32, width: u32, height: u32,) -> Self {
-        PushConstants { time_passed, width, height }
+    pub fn new(time_passed: f32, width: u32, height: u32, mouse_x: f32, mouse_y: f32) -> Self {
+        PushConstants { time_passed, width, height, mouse_x, mouse_y }
     }
 }
 

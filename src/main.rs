@@ -5,7 +5,7 @@
 
 #![allow(unused_imports)]
 
-use bevy::{app::AppExit, prelude::*, window::WindowResizeConstraints};
+use bevy::{app::AppExit, prelude::*, window::WindowResizeConstraints, input::mouse::MouseMotion};
 use bevy_pixels::prelude::*;
 use nalgebra::*;
 use rand::prelude::*;
@@ -23,6 +23,10 @@ use rand::Rng;
 //     DrawObjects,
 // }
 
+struct MousePos {
+    pos: [f32; 2],
+}
+
 fn main() {
     App::new()
         .insert_resource(WindowDescriptor {
@@ -39,6 +43,9 @@ fn main() {
         .insert_resource(
             compute_device::ComputeDevice::new()
         )
+        .insert_resource(
+            MousePos{pos: [0.;2]}
+        )
         // .insert_resource(GameObjects {
         //     balls: vec![
         //         Ball::new(Vector3::new(200., 200., 10.), 50., [255, 0, 0, 255]),
@@ -49,10 +56,11 @@ fn main() {
             width: WIDTH,
             height: HEIGHT,
         })
-        .add_startup_system(init_compute_device_system)
+        .add_startup_system(init_compute_device)
         .add_plugins(DefaultPlugins)
         .add_plugin(PixelsPlugin)
-        .add_system(exit_on_escape_system)
+        .add_system(exit_on_escape)
+        .add_system(get_mouse_pos)
         // .add_stage_after(
         //     PixelsStage::Draw,
         //     AppStage::DrawBackground,
@@ -63,13 +71,27 @@ fn main() {
         //     AppStage::DrawObjects,
         //     SystemStage::parallel(),
         // )
-        .add_system(draw_objects_system)
+        .add_system(draw_objects)
         // .add_system_to_stage(AppStage::DrawBackground, draw_background_system)
         // .add_system_to_stage(AppStage::DrawObjects, draw_objects_system)
         .run();
 }
 
-fn exit_on_escape_system(
+fn get_mouse_pos(
+    windows: Res<Windows>,
+    mut mouse_pos: ResMut<MousePos>,
+) {
+    let window = windows.get_primary().unwrap();
+
+    if let Some(mouse_pos_) = window.cursor_position() {
+        mouse_pos.pos = [
+            mouse_pos_.x,
+            HEIGHT as f32 - mouse_pos_.y,
+        ]
+    }
+}
+
+fn exit_on_escape(
     keyboard_input: Res<Input<KeyCode>>,
     mut app_exit_events: EventWriter<AppExit>,
 ) {
@@ -78,7 +100,7 @@ fn exit_on_escape_system(
     }
 }
 
-fn init_compute_device_system(
+fn init_compute_device(
     mut compute_device: ResMut<ComputeDevice>
 ) {
     compute_device.init();
@@ -86,10 +108,11 @@ fn init_compute_device_system(
     compute_device.create_pipeline();
 }
 
-fn draw_objects_system(
+fn draw_objects(
     mut pixels_resource: ResMut<PixelsResource>,
-    mut compute_device: ResMut<ComputeDevice>
+    mut compute_device: ResMut<ComputeDevice>,
     // game_objects: Res<GameObjects>,
+    mouse_pos: Res<MousePos>,
 ) {
 
 
@@ -98,7 +121,9 @@ fn draw_objects_system(
         PushConstants::new(
             0.,
             WIDTH,
-            HEIGHT
+            HEIGHT,
+            mouse_pos.pos[0],
+            mouse_pos.pos[1],
         )
     );
     compute_device.await_future();
