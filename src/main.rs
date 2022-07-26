@@ -24,9 +24,10 @@ mod vulkano_backend;
 use vulkano::pipeline::compute;
 use vulkano_backend::{compute_device::{
     self, //ComputeDevice, PushConstants, BUFFER_SIZE, HEIGHT, WIDTH,
-}, vulkano_device};
+}, vulkano_device::{self, VulkanoDevice}};
 
 use rand::Rng;
+use std::sync::Arc;
 
 // #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 // enum AppStage {
@@ -39,7 +40,13 @@ struct MousePos {
 }
 
 fn main() {
-    vulkano_device::main_vulkano();
+    let mut v_device = VulkanoDevice::new_with_initialization();
+    // let run_v_device  = v_device .clone();
+    v_device.run();
+    // v_device.run();
+    // temp.run();
+    let test = v_device;
+    // vulkano_device::main_vulkano();
 }
 
 // fn start_app() {
