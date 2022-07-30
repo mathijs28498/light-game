@@ -26,6 +26,8 @@ use vulkano_backend::{compute_device::{
     self, //ComputeDevice, PushConstants, BUFFER_SIZE, HEIGHT, WIDTH,
 }, vulkano_device::{self, VulkanoDevice}};
 
+mod game_object;
+
 use rand::Rng;
 use std::sync::Arc;
 

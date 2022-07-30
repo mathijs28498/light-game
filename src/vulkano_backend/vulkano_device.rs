@@ -18,8 +18,7 @@ use vulkano::{
             vertex_input::BuffersDefinition,
             viewport::{Viewport, ViewportState},
         },
-        GraphicsPipeline,
-        Pipeline,
+        GraphicsPipeline, Pipeline,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     shader::ShaderModule,
@@ -36,6 +35,9 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
+use crate::game_object::{help_functions::{get_all_clockwise_points}, game_object::{GameObject, Line}};
+use nalgebra_glm as glm;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 struct Vertex {
@@ -43,9 +45,13 @@ struct Vertex {
 }
 impl_vertex!(Vertex, position);
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 struct PushConstants {
     mouse_pos: [f32; 2],
     resolution: [f32; 2],
+    dimensions: [f32; 2],
+    time_passed: f32,
 }
 
 pub struct VulkanoDevice {
@@ -54,9 +60,6 @@ pub struct VulkanoDevice {
     device: Arc<Device>,
     queue: Arc<Queue>,
     swapchain: Arc<Swapchain<Window>>,
-    // vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
-    // vs: Arc<ShaderModule>,
-    // fs: Arc<ShaderModule>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
     viewport: Viewport,
@@ -232,8 +235,15 @@ impl VulkanoDevice {
         let mut viewport = self.viewport.clone();
         let mut framebuffers = self.framebuffers.clone();
 
-        
-        let mut mouse_pos = screen_to_shader(&[0., 0.], &surface);
+        let mut mouse_pos = [0., 0.];
+        let mut time_passed = 0.;
+        let game_objects = vec![
+            Line::new(glm::make_vec2(&[100., 300.]), glm::make_vec2(&[200., 100.])),
+            Line::new(glm::make_vec2(&[500., 100.]), glm::make_vec2(&[600., 200.])),
+            Line::new(glm::make_vec2(&[400., 500.]), glm::make_vec2(&[200., 600.])),
+        ];
+
+        let points: Vec<glm::Vec2> = get_all_clockwise_points(&game_objects);
 
         let event_loop = std::mem::replace(&mut self.event_loop, None);
         if let Some(el) = event_loop {
@@ -251,14 +261,10 @@ impl VulkanoDevice {
                     recreate_swapchain = true;
                 }
                 Event::WindowEvent {
-                    event:
-                        WindowEvent::CursorMoved {
-                            position,
-                            ..
-                        },
+                    event: WindowEvent::CursorMoved { position, .. },
                     ..
                 } => {
-                    mouse_pos = screen_to_shader(&[position.x as f32, position.y as f32], &surface)
+                    mouse_pos = [position.x as f32, position.y as f32];
                 }
                 Event::RedrawEventsCleared => {
                     let dimensions = surface.window().inner_size();
@@ -308,13 +314,12 @@ impl VulkanoDevice {
                     )
                     .unwrap();
 
-                    let (vertices, indices) = create_vertices(&mouse_pos);
+                    let (vertices, indices) = create_vertices(&mouse_pos, &game_objects, &points);
                     // .try_into().expect("Failed to create vertex array");
 
                     let vertex_buffer = CpuAccessibleBuffer::from_iter(
                         device.clone(),
-                        BufferUsage::all()
-                        ,
+                        BufferUsage::all(),
                         false,
                         vertices,
                     )
@@ -328,14 +333,16 @@ impl VulkanoDevice {
                     )
                     .unwrap();
 
-                    
                     let dim = surface.window().inner_size();
                     let res = [dim.width as f32, dim.height as f32];
 
-                    let push_constants = PushConstants{
+                    let push_constants = PushConstants {
                         mouse_pos: mouse_pos.clone(),
                         resolution: res,
+                        dimensions: [dimensions.width as f32, dimensions.height as f32],
+                        time_passed,
                     };
+                    time_passed += 0.01;
 
                     builder
                         .begin_render_pass(
@@ -387,37 +394,53 @@ impl VulkanoDevice {
     }
 }
 
-fn create_vertices(mouse_pos: &[f32; 2]) -> (Vec<Vertex>, Vec<u32>) {
-    const corner_space: f32 = 1.;
+// TODO: Draw a concave polygon more efficiently
+fn create_vertices(
+    mouse_pos: &[f32; 2],
+    game_objects: &Vec<impl GameObject>,
+    points: &Vec<glm::Vec2>,
+) -> (Vec<Vertex>, Vec<u32>) {
     let mut vertices = vec![
         Vertex {
-            position: [-corner_space, -corner_space],
-        },
-        Vertex {
-            position: [corner_space, -corner_space],
-        },
-        Vertex {
-            position: [-corner_space, corner_space],
-        },
-        Vertex {
-            position: [corner_space, corner_space],
-        },
+            position: mouse_pos.clone(),
+        }
     ];
+    vertices.extend(points.iter().map(|p| Vertex {
+        position: [p.x, p.y],
+    }));
 
+    // let mut indices = Vec::new();
+    // for i in 0..vertices.len() - 1 {
+
+    // }
+    
     let indices = vec![
-        0, 1, 2,
-        1, 3, 2
+        0, 1, 2, 
+        0, 2, 3, 
+        0, 3, 4, 
+        0, 4, 5, 
+        0, 5, 6,
+        0, 6, 1,
     ];
+    // const corner_space: f32 = 1.;
+    // let mut vertices = vec![
+    //     Vertex {
+    //         position: [-corner_space, -corner_space],
+    //     },
+    //     Vertex {
+    //         position: [corner_space, -corner_space],
+    //     },
+    //     Vertex {
+    //         position: [-corner_space, corner_space],
+    //     },
+    //     Vertex {
+    //         position: [corner_space, corner_space],
+    //     },
+    // ];
+
+    // let indices = vec![0, 1, 2, 1, 3, 2];
 
     (vertices, indices)
-}
-
-fn screen_to_shader(pos: &[f32; 2], surface: &Arc<Surface<Window>>) -> [f32; 2] {
-    let dimensions = surface.window().inner_size();
-    [
-        pos[0] / dimensions.width as f32,
-        pos[1] / dimensions.height as f32,
-    ]
 }
 
 fn window_size_dependent_setup(
