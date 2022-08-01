@@ -264,7 +264,7 @@ impl VulkanoDevice {
 
         let start_p = glm::Vec2::new(100., 300.);
         let end_p = glm::Vec2::new(700., 400.);
-        let gap_amount = 30;
+        let gap_amount = 70;
 
         game_objects.push(Box::new(DottedLine::new(
             start_p.clone(),
@@ -277,8 +277,26 @@ impl VulkanoDevice {
         game_objects.push(Box::new(DottedLine::new(
             start_p1.clone(),
             end_p1.clone(),
-            20,
+            gap_amount,
         )));
+
+        
+        // let start_p2 = glm::Vec2::new(200., 100.);
+        // let end_p2 = glm::Vec2::new(300., 700.);
+        // game_objects.push(Box::new(DottedLine::new(
+        //     start_p2.clone(),
+        //     end_p2.clone(),
+        //     gap_amount,
+        // )));
+
+        
+        // let start_p3 = glm::Vec2::new(300., 100.);
+        // let end_p3 = glm::Vec2::new(400., 700.);
+        // game_objects.push(Box::new(DottedLine::new(
+        //     start_p3.clone(),
+        //     end_p3.clone(),
+        //     gap_amount,
+        // )));
 
         // let size = (end_p - start_p).magnitude() / (gap_amount as f32 * 2. + 1.);
         // for i in 0..gap_amount {
