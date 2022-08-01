@@ -35,7 +35,10 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use crate::game_object::{help_functions::{get_all_clockwise_points}, game_object::{GameObject, Line}};
+use crate::game_object::{
+    game_object::{GameObject, Light, Line, AABB},
+    help_functions::{calculate_indices_polygon, get_all_points},
+};
 use nalgebra_glm as glm;
 
 #[repr(C)]
@@ -46,9 +49,9 @@ struct Vertex {
 impl_vertex!(Vertex, position);
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+#[derive(Clone, Copy, Debug, Default)]
 struct PushConstants {
-    mouse_pos: [f32; 2],
+    mouse_pos: glm::Vec2,
     resolution: [f32; 2],
     dimensions: [f32; 2],
     time_passed: f32,
@@ -235,15 +238,58 @@ impl VulkanoDevice {
         let mut viewport = self.viewport.clone();
         let mut framebuffers = self.framebuffers.clone();
 
-        let mut mouse_pos = [0., 0.];
+        let mut mouse_pos = glm::Vec2::new(0., 0.);
         let mut time_passed = 0.;
-        let game_objects = vec![
-            Line::new(glm::make_vec2(&[100., 300.]), glm::make_vec2(&[200., 100.])),
-            Line::new(glm::make_vec2(&[500., 100.]), glm::make_vec2(&[600., 200.])),
-            Line::new(glm::make_vec2(&[400., 500.]), glm::make_vec2(&[200., 600.])),
+        let dimensions = surface.window().inner_size();
+        let sb_offset = -1.;
+
+        // TODO: add debug to game objects as well
+        let mut game_objects: Vec<Box<dyn GameObject>> = vec![
+            Box::new(AABB::new(
+                glm::Vec2::new(sb_offset, sb_offset),
+                glm::Vec2::new(
+                    dimensions.width as f32 - sb_offset,
+                    dimensions.height as f32 - sb_offset,
+                ),
+            )),
+            Box::new(Line::new(
+                glm::Vec2::new(200., 100.),
+                glm::Vec2::new(400., 100.),
+            )),
+            Box::new(Line::new(
+                glm::Vec2::new(100., 200.),
+                glm::Vec2::new(800., 200.),
+            )),
+            // Line::new(glm::make_vec2(&[400., 500.]), glm::make_vec2(&[200., 600.])),
         ];
 
-        let points: Vec<glm::Vec2> = get_all_clockwise_points(&game_objects);
+        let start_wall = 100.;
+        let gap = 2.;
+        let wall_size = 6.;
+        let full_size = gap + wall_size;
+        let wall_height = 300.;
+        let wall_amount = 50;
+        for i in 0..wall_amount {
+            game_objects.push(Box::new(Line::new(
+                glm::Vec2::new(start_wall + full_size * i as f32 + gap, wall_height),
+                glm::Vec2::new(start_wall + full_size * i as f32 + full_size, wall_height),
+            )));
+        }
+
+        game_objects.push(Box::new(Line::new(
+            glm::Vec2::new(0., wall_height),
+            glm::Vec2::new(start_wall, wall_height),
+        )));
+        game_objects.push(Box::new(Line::new(
+            glm::Vec2::new(
+                start_wall + full_size * wall_amount as f32 + gap,
+                wall_height,
+            ),
+            glm::Vec2::new(700., wall_height),
+        )));
+
+        let points: Vec<glm::Vec2> = get_all_points(&game_objects);
+        let mut light = Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone());
 
         let event_loop = std::mem::replace(&mut self.event_loop, None);
         if let Some(el) = event_loop {
@@ -264,7 +310,8 @@ impl VulkanoDevice {
                     event: WindowEvent::CursorMoved { position, .. },
                     ..
                 } => {
-                    mouse_pos = [position.x as f32, position.y as f32];
+                    mouse_pos = glm::Vec2::new(position.x as f32, position.y as f32);
+                    light.center = mouse_pos.clone();
                 }
                 Event::RedrawEventsCleared => {
                     let dimensions = surface.window().inner_size();
@@ -314,8 +361,7 @@ impl VulkanoDevice {
                     )
                     .unwrap();
 
-                    let (vertices, indices) = create_vertices(&mouse_pos, &game_objects, &points);
-                    // .try_into().expect("Failed to create vertex array");
+                    let (vertices, indices) = create_vertices(&game_objects, &points, &light);
 
                     let vertex_buffer = CpuAccessibleBuffer::from_iter(
                         device.clone(),
@@ -337,7 +383,7 @@ impl VulkanoDevice {
                     let res = [dim.width as f32, dim.height as f32];
 
                     let push_constants = PushConstants {
-                        mouse_pos: mouse_pos.clone(),
+                        mouse_pos: mouse_pos.into(),
                         resolution: res,
                         dimensions: [dimensions.width as f32, dimensions.height as f32],
                         time_passed,
@@ -396,49 +442,24 @@ impl VulkanoDevice {
 
 // TODO: Draw a concave polygon more efficiently
 fn create_vertices(
-    mouse_pos: &[f32; 2],
-    game_objects: &Vec<impl GameObject>,
+    game_objects: &Vec<Box<dyn GameObject>>,
     points: &Vec<glm::Vec2>,
+    light: &Light,
 ) -> (Vec<Vertex>, Vec<u32>) {
-    let mut vertices = vec![
-        Vertex {
-            position: mouse_pos.clone(),
-        }
-    ];
-    vertices.extend(points.iter().map(|p| Vertex {
+    let light_polygon = light.calculate_light_polygon(game_objects, points);
+    let light_vertices = light_polygon.iter().map(|p| Vertex {
         position: [p.x, p.y],
-    }));
+    });
 
-    // let mut indices = Vec::new();
-    // for i in 0..vertices.len() - 1 {
+    let mut vertices = vec![Vertex {
+        position: [light.center.x, light.center.y],
+    }];
+    vertices.extend(light_vertices);
+    while vertices.len() < 3 {
+        vertices.push(Vertex { position: [0., 0.] });
+    }
 
-    // }
-    
-    let indices = vec![
-        0, 1, 2, 
-        0, 2, 3, 
-        0, 3, 4, 
-        0, 4, 5, 
-        0, 5, 6,
-        0, 6, 1,
-    ];
-    // const corner_space: f32 = 1.;
-    // let mut vertices = vec![
-    //     Vertex {
-    //         position: [-corner_space, -corner_space],
-    //     },
-    //     Vertex {
-    //         position: [corner_space, -corner_space],
-    //     },
-    //     Vertex {
-    //         position: [-corner_space, corner_space],
-    //     },
-    //     Vertex {
-    //         position: [corner_space, corner_space],
-    //     },
-    // ];
-
-    // let indices = vec![0, 1, 2, 1, 3, 2];
+    let indices = calculate_indices_polygon(vertices.len() - 1);
 
     (vertices, indices)
 }

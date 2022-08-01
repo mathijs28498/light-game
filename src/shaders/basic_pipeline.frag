@@ -18,7 +18,7 @@ void main() {
     
     vec2 lightPos = pc.mousePos;
     float smallestDim = min(pc.dimensions.x, pc.dimensions.y);
-    float radius = 700.;
+    float radius = 300.;
 
 
     vec3 col = getLightColor(baseColor, brightnessFactor, lightPos, radius);

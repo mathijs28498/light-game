@@ -1,20 +1,79 @@
+use crate::game_object::help_functions::calculate_clockwise_points;
+
 use nalgebra_glm as glm;
 
 pub trait GameObject {
-    fn ray_collision(&self, ray: &Ray) -> Option<RayCollision>;
+    fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision>;
     fn get_corners(&self) -> Vec<glm::Vec2>;
 }
 
-pub struct RayCollision {
-
+#[derive(Debug)]
+pub struct Collision {
+    t: f32,
+    collision_points: Vec<glm::Vec2>,
 }
 
+impl Collision {
+    pub fn new(t: f32, collision_points: Vec<glm::Vec2>) -> Self {
+        Self {
+            t,
+            collision_points,
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Ray {
     orig: glm::Vec2,
     dir: glm::Vec2,
+    inv_dir: glm::Vec2,
     t: f32,
 }
 
+impl Ray {
+    pub fn new(orig: glm::Vec2, dir: glm::Vec2, t: f32) -> Self {
+        Self {
+            orig,
+            dir,
+            inv_dir: glm::Vec2::new(1. / dir.x, 1. / dir.y),
+            t,
+        }
+    }
+
+    fn new_between_points(orig: glm::Vec2, p: &glm::Vec2, offset_perc: Option<f32>) -> Self {
+        let mut dir = p - orig;
+        let t = dir.normalize_mut();
+
+        Self::new(orig, dir, t * offset_perc.unwrap_or(0.999))
+    }
+
+    fn new_from_angle(orig: glm::Vec2, angle: f32, t: f32) -> Self {
+        Self::new(orig, glm::Vec2::new(angle.cos(), angle.sin()), t)
+    }
+
+    fn get_point_from_t(&self, t: f32) -> glm::Vec2 {
+        self.orig + self.dir * t
+    }
+
+    fn get_angle_rays(&self, epsilon: Option<f32>) -> [Ray; 2] {
+        let e = epsilon.unwrap_or(0.0001);
+        let mut alpha = self.dir.x.acos();
+
+        if self.dir.y < 0. {
+            alpha *= -1.;
+        }
+
+        let alpha_min = alpha - e;
+        let alpha_plus = alpha + e;
+
+        return [
+            Ray::new_from_angle(self.orig.clone(), alpha_min, self.t),
+            Ray::new_from_angle(self.orig.clone(), alpha_plus, self.t),
+        ];
+    }
+}
+
+#[derive(Debug)]
 pub struct Line {
     p0: glm::Vec2,
     p1: glm::Vec2,
@@ -22,13 +81,26 @@ pub struct Line {
 
 impl Line {
     pub fn new(p0: glm::Vec2, p1: glm::Vec2) -> Self {
-        Line{ p0, p1 }
+        Line { p0, p1 }
     }
 }
 
+fn cross_vec2(a: &glm::Vec2, b: &glm::Vec2) -> f32 {
+    a.x * b.y - a.y * b.x
+}
+
 impl GameObject for Line {
-    fn ray_collision(&self, ray: &Ray) -> Option<RayCollision> {
-        None
+    fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision> {
+        let v0 = ray.orig - self.p0;
+        let v1 = self.p1 - self.p0;
+        let v2 = glm::Vec2::new(-ray.dir.y, ray.dir.x);
+        let t0 = cross_vec2(&v1, &v0) / v1.dot(&v2);
+        let t1 = v0.dot(&v2) / v1.dot(&v2);
+
+        if t0 < 0. || t1 < 0. || t1 > 1. || (!ignore_t && t0 > ray.t) {
+            return None;
+        }
+        Some(Collision::new(t0, vec![ray.get_point_from_t(t0)]))
     }
 
     fn get_corners(&self) -> Vec<glm::Vec2> {
@@ -36,17 +108,19 @@ impl GameObject for Line {
     }
 }
 
+#[derive(Debug)]
 pub struct AABB {
-    min: glm::Vec2,
-    max: glm::Vec2,
+    pub min: glm::Vec2,
+    pub max: glm::Vec2,
     xminymax: glm::Vec2,
     xmaxymin: glm::Vec2,
 }
 
 impl AABB {
     pub fn new(min: glm::Vec2, max: glm::Vec2) -> Self {
-        AABB{ 
-            min, max,
+        AABB {
+            min,
+            max,
             xminymax: glm::Vec2::new(min.x, max.y),
             xmaxymin: glm::Vec2::new(max.x, min.y),
         }
@@ -54,16 +128,116 @@ impl AABB {
 }
 
 impl GameObject for AABB {
-    fn ray_collision(&self, ray: &Ray) -> Option<RayCollision> {
-        None
+    fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision> {
+        let (mut tmin, mut tmax, tymin, tymax);
+
+        if ray.inv_dir.x >= 0. {
+            tmin = (self.min.x - ray.orig.x) * ray.inv_dir.x;
+            tmax = (self.max.x - ray.orig.x) * ray.inv_dir.x;
+        } else {
+            tmin = (self.max.x - ray.orig.x) * ray.inv_dir.x;
+            tmax = (self.min.x - ray.orig.x) * ray.inv_dir.x;
+        }
+
+        if ray.inv_dir.y >= 0. {
+            tymin = (self.min.y - ray.orig.y) * ray.inv_dir.y;
+            tymax = (self.max.y - ray.orig.y) * ray.inv_dir.y;
+        } else {
+            tymin = (self.max.y - ray.orig.y) * ray.inv_dir.y;
+            tymax = (self.min.y - ray.orig.y) * ray.inv_dir.y;
+        }
+
+        if (tmin > tymax) || (tymin > tmax) {
+            return None;
+        }
+
+        if tymin > tmin {
+            tmin = tymin;
+        }
+        if tymax < tmax {
+            tmax = tymax;
+        }
+
+        let t = if tmin > 0. { tmin } else { tmax };
+
+        if !ignore_t && t > ray.t {
+            return None;
+        }
+
+        Some(Collision::new(t, vec![ray.get_point_from_t(t)]))
     }
 
     fn get_corners(&self) -> Vec<glm::Vec2> {
-        vec![
-            self.min,
-            self.max,
-            self.xminymax,
-            self.xmaxymin,
-        ]
+        vec![self.min, self.max, self.xminymax, self.xmaxymin]
+    }
+}
+
+pub struct Light {
+    color: glm::Vec3,
+    pub center: glm::Vec2,
+}
+
+impl Light {
+    pub fn new(color: glm::Vec3, center: glm::Vec2) -> Self {
+        Light { color, center }
+    }
+
+    pub fn calculate_light_polygon(
+        &self,
+        game_objects: &Vec<Box<dyn GameObject>>,
+        points: &Vec<glm::Vec2>,
+    ) -> Vec<glm::Vec2> {
+        let mut corner_points = Vec::with_capacity(points.len());
+        let mut p_rays = Vec::with_capacity(points.len());
+
+        for p in points {
+            let p_ray = Ray::new_between_points(self.center.clone(), &p, None);
+
+            let mut add_point = true;
+            for go in game_objects {
+                if let Some(coll) = go.ray_collision(&p_ray, false) {
+                    add_point = false;
+                    break;
+                }
+            }
+
+            if add_point {
+                corner_points.push(p.clone());
+                p_rays.push(p_ray);
+            }
+        }
+        
+        corner_points = calculate_clockwise_points(corner_points, self.center);
+
+        let mut actual_points: Vec<glm::Vec2> = Vec::with_capacity(corner_points.len() * 2);
+        for (i, p) in corner_points.iter().enumerate() {
+            let p_angle_ray = p_rays[i].get_angle_rays(None);
+
+            for p_ray in p_angle_ray {
+                let mut t_near = f32::MAX;
+                let mut closest_point = None;
+
+                for go in game_objects {
+                    // TODO: Create 2 rays from p_ray with offset
+                    // TODO: Get closest point of both rays
+                    if let Some(coll) = go.ray_collision(&p_ray, true) {
+                        if coll.t < t_near {
+                            t_near = coll.t;
+                            closest_point = Some(coll.collision_points[0]);
+                        }
+                    }
+                }
+
+                if let Some(cp) = closest_point {
+                    actual_points.push(cp);
+                }
+            }
+
+            
+
+        }
+
+        
+        calculate_clockwise_points(actual_points, self.center)
     }
 }
