@@ -172,6 +172,62 @@ impl GameObject for AABB {
     }
 }
 
+// 2 dotted lines in parralel form optical illusion when light in center
+pub struct DottedLine {
+    bounding_line: Line,
+    lines: Vec<Line>,
+    gap_amount: u32,
+}
+
+impl DottedLine {
+    pub fn new(p0: glm::Vec2, p1: glm::Vec2, gap_amount: u32) -> Self {
+        // Use direction for offset
+        let mut line_dir = p1 - p0;
+        let magnitude = line_dir.magnitude();
+        line_dir = line_dir / magnitude;
+
+        let size = magnitude / (gap_amount as f32 * 2. + 1.);
+
+        let mut lines = Vec::with_capacity(gap_amount as usize + 1);
+        for i in 0..gap_amount {
+            let offset = i as f32 * size * 2.;
+            let offset_0 = line_dir * offset;
+            let offset_1 = line_dir * (offset + size);
+            lines.push(Line::new(p0 + offset_0, p0 + offset_1));
+        }
+        lines.push(Line::new(p1 - glm::Vec2::new(size, 0.), p1));
+
+        Self {
+            bounding_line: Line::new(p0, p1),
+            lines,
+            gap_amount,
+        }
+    }
+}
+
+impl GameObject for DottedLine {
+    fn get_corners(&self) -> Vec<glm::Vec2> {
+        let mut res = Vec::with_capacity(self.lines.len() * 2);
+
+        for l in &self.lines {
+            res.extend(l.get_corners());
+        }
+
+        res
+    }
+
+    fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision> {
+        // Check if this collision is a bottleneck 
+        //  - could be optimized to O = log(N) (in stead of O = N^^2) to look for bounding line and then subdivide
+        for l in &self.lines {
+            if let Some(coll) = l.ray_collision(ray, ignore_t) {
+                return Some(coll);
+            }
+        }
+        None
+    }
+}
+
 pub struct Light {
     color: glm::Vec3,
     pub center: glm::Vec2,
@@ -206,7 +262,7 @@ impl Light {
                 p_rays.push(p_ray);
             }
         }
-        
+
         corner_points = calculate_clockwise_points(corner_points, self.center);
 
         let mut actual_points: Vec<glm::Vec2> = Vec::with_capacity(corner_points.len() * 2);
@@ -232,12 +288,8 @@ impl Light {
                     actual_points.push(cp);
                 }
             }
-
-            
-
         }
 
-        
         calculate_clockwise_points(actual_points, self.center)
     }
 }

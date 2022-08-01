@@ -36,7 +36,7 @@ use winit::{
 };
 
 use crate::game_object::{
-    game_object::{GameObject, Light, Line, AABB},
+    game_object::{DottedLine, GameObject, Light, Line, AABB},
     help_functions::{calculate_indices_polygon, get_all_points},
 };
 use nalgebra_glm as glm;
@@ -257,36 +257,46 @@ impl VulkanoDevice {
                 glm::Vec2::new(400., 100.),
             )),
             Box::new(Line::new(
-                glm::Vec2::new(100., 200.),
-                glm::Vec2::new(800., 200.),
+                glm::Vec2::new(100., 150.),
+                glm::Vec2::new(800., 150.),
             )),
-            // Line::new(glm::make_vec2(&[400., 500.]), glm::make_vec2(&[200., 600.])),
         ];
 
-        let start_wall = 100.;
-        let gap = 2.;
-        let wall_size = 6.;
-        let full_size = gap + wall_size;
-        let wall_height = 300.;
-        let wall_amount = 50;
-        for i in 0..wall_amount {
-            game_objects.push(Box::new(Line::new(
-                glm::Vec2::new(start_wall + full_size * i as f32 + gap, wall_height),
-                glm::Vec2::new(start_wall + full_size * i as f32 + full_size, wall_height),
-            )));
-        }
+        let start_p = glm::Vec2::new(100., 300.);
+        let end_p = glm::Vec2::new(700., 400.);
+        let gap_amount = 30;
 
-        game_objects.push(Box::new(Line::new(
-            glm::Vec2::new(0., wall_height),
-            glm::Vec2::new(start_wall, wall_height),
+        game_objects.push(Box::new(DottedLine::new(
+            start_p.clone(),
+            end_p.clone(),
+            gap_amount,
         )));
-        game_objects.push(Box::new(Line::new(
-            glm::Vec2::new(
-                start_wall + full_size * wall_amount as f32 + gap,
-                wall_height,
-            ),
-            glm::Vec2::new(700., wall_height),
+        
+        let start_p1 = glm::Vec2::new(100., 200.);
+        let end_p1 = glm::Vec2::new(700., 300.);
+        game_objects.push(Box::new(DottedLine::new(
+            start_p1.clone(),
+            end_p1.clone(),
+            20,
         )));
+
+        // let size = (end_p - start_p).magnitude() / (gap_amount as f32 * 2. + 1.);
+        // for i in 0..gap_amount {
+        //     let i_f32 = i as f32;
+        //     let offset = i_f32 * size * 2.;
+        //     let offset_0 = glm::Vec2::new(offset, 0.);
+        //     let offset_1 = glm::Vec2::new(offset + size, 0.);
+        //     game_objects.push(Box::new(Line::new(
+        //         start_p + offset_0,
+        //         start_p + offset_1,
+        //     )));
+        // }
+        // game_objects.push(
+        //     Box::new(Line::new(
+        //         end_p - glm::Vec2::new(size, 0.),
+        //         end_p,
+        //     ))
+        // );
 
         let points: Vec<glm::Vec2> = get_all_points(&game_objects);
         let mut light = Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone());
