@@ -316,7 +316,7 @@ impl VulkanoDevice {
         //     ))
         // );
 
-        let points: Vec<glm::Vec2> = get_all_points(&game_objects);
+        // let points: Vec<glm::Vec2> = get_all_points(&game_objects);
         let mut light = Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone());
 
         let event_loop = std::mem::replace(&mut self.event_loop, None);
@@ -389,7 +389,7 @@ impl VulkanoDevice {
                     )
                     .unwrap();
 
-                    let (vertices, indices) = create_vertices(&game_objects, &points, &light);
+                    let (vertices, indices) = create_vertices(&game_objects, &light);
 
                     let vertex_buffer = CpuAccessibleBuffer::from_iter(
                         device.clone(),
@@ -471,10 +471,9 @@ impl VulkanoDevice {
 // TODO: Draw a concave polygon more efficiently
 fn create_vertices(
     game_objects: &Vec<Box<dyn GameObject>>,
-    points: &Vec<glm::Vec2>,
     light: &Light,
 ) -> (Vec<Vertex>, Vec<u32>) {
-    let light_polygon = light.calculate_light_polygon(game_objects, points);
+    let light_polygon = light.calculate_light_polygon(game_objects);
     let light_vertices = light_polygon.iter().map(|p| Vertex {
         position: [p.x, p.y],
     });

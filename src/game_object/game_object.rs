@@ -217,7 +217,7 @@ impl GameObject for DottedLine {
     }
 
     fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision> {
-        // Check if this collision is a bottleneck 
+        // Check if this collision is a bottleneck
         //  - could be optimized to O = log(N) (in stead of O = N^^2) to look for bounding line and then subdivide
         for l in &self.lines {
             if let Some(coll) = l.ray_collision(ray, ignore_t) {
@@ -231,61 +231,70 @@ impl GameObject for DottedLine {
 pub struct Light {
     color: glm::Vec3,
     pub center: glm::Vec2,
+    radius: f32,
 }
 
 impl Light {
     pub fn new(color: glm::Vec3, center: glm::Vec2) -> Self {
-        Light { color, center }
+        Light { color, center, radius: 200. }
     }
 
     pub fn calculate_light_polygon(
         &self,
         game_objects: &Vec<Box<dyn GameObject>>,
-        points: &Vec<glm::Vec2>,
     ) -> Vec<glm::Vec2> {
-        let mut corner_points = Vec::with_capacity(points.len());
-        let mut p_rays = Vec::with_capacity(points.len());
+        let mut p_rays_go: Vec<(&Box<dyn GameObject>, Vec<Ray>)> = Vec::new(); // Vec::with_capacity(points.len());
 
-        for p in points {
-            let p_ray = Ray::new_between_points(self.center.clone(), &p, None);
-
-            let mut add_point = true;
-            for go in game_objects {
-                if let Some(coll) = go.ray_collision(&p_ray, false) {
-                    add_point = false;
-                    break;
-                }
-            }
-
-            if add_point {
-                corner_points.push(p.clone());
-                p_rays.push(p_ray);
-            }
-        }
-
-        corner_points = calculate_clockwise_points(corner_points, self.center);
-
-        let mut actual_points: Vec<glm::Vec2> = Vec::with_capacity(corner_points.len() * 2);
-        for (i, p) in corner_points.iter().enumerate() {
-            let p_angle_ray = p_rays[i].get_angle_rays(None);
-
-            for p_ray in p_angle_ray {
-                let mut t_near = f32::MAX;
-                let mut closest_point = None;
-
-                for go in game_objects {
-                    // TODO: Create 2 rays from p_ray with offset
-                    // TODO: Get closest point of both rays
-                    if let Some(coll) = go.ray_collision(&p_ray, true) {
-                        if coll.t < t_near {
-                            t_near = coll.t;
-                            closest_point = Some(coll.collision_points[0]);
-                        }
+        for go in game_objects {
+            let mut ray_game_object = None;
+            for p in go.get_corners() {
+                let p_ray = Ray::new_between_points(self.center.clone(), &p, None);
+                let mut add_point = true;
+                for go_ in game_objects {
+                    if let Some(coll) = go_.ray_collision(&p_ray, false) {
+                        add_point = false;
+                        break;
                     }
                 }
 
-                if let Some(cp) = closest_point {
-                    actual_points.push(cp);
+                if add_point {
+                    if let Some(ray_go) = ray_game_object {
+                        // let test = p_rays_go.last_mut().unwrap().1.push(p_ray);
+                        p_rays_go.last_mut().expect("Couldn't get last item of p_rays_go").1.push(p_ray);
+                    } else {
+                        p_rays_go.push((go, vec![p_ray]));
+                        ray_game_object = Some(go);
+                    }
+                }
+            }
+        }
+
+        let mut actual_points: Vec<glm::Vec2> = Vec::with_capacity(p_rays_go.len() * 2);
+        for (ray_go, p_rays) in p_rays_go {
+            for p_ray in p_rays {
+                let p_angle_ray = p_ray.get_angle_rays(None);
+
+                for p_ray in p_angle_ray {
+                    let mut t_near = f32::MAX;
+                    let mut closest_point = None;
+
+                    if let Some(coll) = ray_go.ray_collision(&p_ray, true) {
+                        actual_points.push(coll.collision_points[0]);
+                        continue;
+                    }
+
+                    for go in game_objects {
+                        if let Some(coll) = go.ray_collision(&p_ray, true) {
+                            if coll.t < t_near {
+                                t_near = coll.t;
+                                closest_point = Some(coll.collision_points[0]);
+                            }
+                        }
+                    }
+
+                    if let Some(cp) = closest_point {
+                        actual_points.push(cp);
+                    }
                 }
             }
         }
