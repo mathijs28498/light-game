@@ -1,11 +1,11 @@
 use nalgebra_glm as glm;
 
-use crate::game_object::game_object::GameObject;
+use crate::game_object::game_object::EnvironmentObject;
 
 // TODO: Allow any iterable form as argument
-pub fn get_all_points(game_objects: &Vec<Box<dyn GameObject>>) -> Vec<glm::Vec2> {
+pub fn get_all_points(env_objects: &Vec<Box<dyn EnvironmentObject>>) -> Vec<glm::Vec2> {
     let mut points = vec![];
-    for go in game_objects {
+    for go in env_objects {
         points.extend(go.get_corners().iter());
     }
 
@@ -45,13 +45,13 @@ pub fn calculate_clockwise_points(mut points: Vec<glm::Vec2>, center: glm::Vec2)
     points
 }
 
-pub fn calculate_indices_polygon(triangle_amount: usize) -> Vec<u32> {
+pub fn calculate_indices_polygon(triangle_amount: usize, index_offset: u32) -> Vec<u32> {
     let mut indices = Vec::with_capacity(triangle_amount * 3);
     for i in 0..triangle_amount {
         let index = (i + 1) as u32;
-        indices.push(0);
-        indices.push(index);
-        indices.push(index % triangle_amount as u32 + 1);
+        indices.push(index_offset);
+        indices.push(index + index_offset);
+        indices.push(index % triangle_amount as u32 + 1 + index_offset);
     }
 
     indices

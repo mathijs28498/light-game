@@ -2,7 +2,7 @@ use crate::game_object::help_functions::calculate_clockwise_points;
 
 use nalgebra_glm as glm;
 
-pub trait GameObject {
+pub trait EnvironmentObject {
     fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision>;
     fn get_corners(&self) -> Vec<glm::Vec2>;
 }
@@ -89,7 +89,7 @@ fn cross_vec2(a: &glm::Vec2, b: &glm::Vec2) -> f32 {
     a.x * b.y - a.y * b.x
 }
 
-impl GameObject for Line {
+impl EnvironmentObject for Line {
     fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision> {
         let v0 = ray.orig - self.p0;
         let v1 = self.p1 - self.p0;
@@ -127,7 +127,7 @@ impl AABB {
     }
 }
 
-impl GameObject for AABB {
+impl EnvironmentObject for AABB {
     fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision> {
         let (mut tmin, mut tmax, tymin, tymax);
 
@@ -205,7 +205,7 @@ impl DottedLine {
     }
 }
 
-impl GameObject for DottedLine {
+impl EnvironmentObject for DottedLine {
     fn get_corners(&self) -> Vec<glm::Vec2> {
         let mut res = Vec::with_capacity(self.lines.len() * 2);
 
@@ -229,28 +229,42 @@ impl GameObject for DottedLine {
 }
 
 pub struct Light {
-    color: glm::Vec3,
+    pub color: glm::Vec3,
     pub center: glm::Vec2,
-    radius: f32,
+    pub radius: f32,
+    pub brightness: f32,
 }
 
 impl Light {
-    pub fn new(color: glm::Vec3, center: glm::Vec2) -> Self {
-        Light { color, center, radius: 200. }
+    pub fn new(color: glm::Vec3, center: glm::Vec2, radius: f32, brightness: f32) -> Self {
+        Light { color, center, radius, brightness }
+    }
+
+    pub fn get_buffer_data(&self) -> [f32; 8] {
+        [
+            self.center.x,
+            self.center.y,
+            self.radius,
+            self.brightness,
+            self.color.x,
+            self.color.y,
+            self.color.z,
+            0.,
+        ]
     }
 
     pub fn calculate_light_polygon(
         &self,
-        game_objects: &Vec<Box<dyn GameObject>>,
+        env_objects: &Vec<Box<dyn EnvironmentObject>>,
     ) -> Vec<glm::Vec2> {
-        let mut p_rays_go: Vec<(&Box<dyn GameObject>, Vec<Ray>)> = Vec::new(); // Vec::with_capacity(points.len());
+        let mut p_rays_go: Vec<(&Box<dyn EnvironmentObject>, Vec<Ray>)> = Vec::new(); // Vec::with_capacity(points.len());
 
-        for go in game_objects {
-            let mut ray_game_object = None;
+        for go in env_objects {
+            let mut ray_env_object = None;
             for p in go.get_corners() {
                 let p_ray = Ray::new_between_points(self.center.clone(), &p, None);
                 let mut add_point = true;
-                for go_ in game_objects {
+                for go_ in env_objects {
                     if let Some(coll) = go_.ray_collision(&p_ray, false) {
                         add_point = false;
                         break;
@@ -258,12 +272,12 @@ impl Light {
                 }
 
                 if add_point {
-                    if let Some(ray_go) = ray_game_object {
+                    if let Some(ray_go) = ray_env_object {
                         // let test = p_rays_go.last_mut().unwrap().1.push(p_ray);
                         p_rays_go.last_mut().expect("Couldn't get last item of p_rays_go").1.push(p_ray);
                     } else {
                         p_rays_go.push((go, vec![p_ray]));
-                        ray_game_object = Some(go);
+                        ray_env_object = Some(go);
                     }
                 }
             }
@@ -283,7 +297,7 @@ impl Light {
                         continue;
                     }
 
-                    for go in game_objects {
+                    for go in env_objects {
                         if let Some(coll) = go.ray_collision(&p_ray, true) {
                             if coll.t < t_near {
                                 t_near = coll.t;

@@ -5,6 +5,7 @@ use vulkano::{
     command_buffer::{
         AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
     },
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
@@ -18,7 +19,7 @@ use vulkano::{
             vertex_input::BuffersDefinition,
             viewport::{Viewport, ViewportState},
         },
-        GraphicsPipeline, Pipeline,
+        GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
     render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
     shader::ShaderModule,
@@ -36,7 +37,7 @@ use winit::{
 };
 
 use crate::game_object::{
-    game_object::{DottedLine, GameObject, Light, Line, AABB},
+    game_object::{DottedLine, EnvironmentObject, Light, Line, AABB},
     help_functions::{calculate_indices_polygon, get_all_points},
 };
 use nalgebra_glm as glm;
@@ -44,7 +45,7 @@ use nalgebra_glm as glm;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 struct Vertex {
-    position: [f32; 2],
+    position: [f32; 3],
 }
 impl_vertex!(Vertex, position);
 
@@ -55,6 +56,7 @@ struct PushConstants {
     resolution: [f32; 2],
     dimensions: [f32; 2],
     time_passed: f32,
+    amount_of_lights: u32,
 }
 
 pub struct VulkanoDevice {
@@ -244,7 +246,7 @@ impl VulkanoDevice {
         let sb_offset = -1.;
 
         // TODO: add debug to game objects as well
-        let mut game_objects: Vec<Box<dyn GameObject>> = vec![
+        let mut env_objects: Vec<Box<dyn EnvironmentObject>> = vec![
             Box::new(AABB::new(
                 glm::Vec2::new(sb_offset, sb_offset),
                 glm::Vec2::new(
@@ -264,35 +266,33 @@ impl VulkanoDevice {
 
         let start_p = glm::Vec2::new(100., 300.);
         let end_p = glm::Vec2::new(700., 400.);
-        let gap_amount = 70;
+        let gap_amount = 30;
 
-        game_objects.push(Box::new(DottedLine::new(
+        env_objects.push(Box::new(DottedLine::new(
             start_p.clone(),
             end_p.clone(),
             gap_amount,
         )));
-        
+
         let start_p1 = glm::Vec2::new(100., 200.);
         let end_p1 = glm::Vec2::new(700., 300.);
-        game_objects.push(Box::new(DottedLine::new(
+        env_objects.push(Box::new(DottedLine::new(
             start_p1.clone(),
             end_p1.clone(),
             gap_amount,
         )));
 
-        
         // let start_p2 = glm::Vec2::new(200., 100.);
         // let end_p2 = glm::Vec2::new(300., 700.);
-        // game_objects.push(Box::new(DottedLine::new(
+        // env_objects.push(Box::new(DottedLine::new(
         //     start_p2.clone(),
         //     end_p2.clone(),
         //     gap_amount,
         // )));
 
-        
         // let start_p3 = glm::Vec2::new(300., 100.);
         // let end_p3 = glm::Vec2::new(400., 700.);
-        // game_objects.push(Box::new(DottedLine::new(
+        // env_objects.push(Box::new(DottedLine::new(
         //     start_p3.clone(),
         //     end_p3.clone(),
         //     gap_amount,
@@ -304,20 +304,23 @@ impl VulkanoDevice {
         //     let offset = i_f32 * size * 2.;
         //     let offset_0 = glm::Vec2::new(offset, 0.);
         //     let offset_1 = glm::Vec2::new(offset + size, 0.);
-        //     game_objects.push(Box::new(Line::new(
+        //     env_objects.push(Box::new(Line::new(
         //         start_p + offset_0,
         //         start_p + offset_1,
         //     )));
         // }
-        // game_objects.push(
+        // env_objects.push(
         //     Box::new(Line::new(
         //         end_p - glm::Vec2::new(size, 0.),
         //         end_p,
         //     ))
         // );
-
-        // let points: Vec<glm::Vec2> = get_all_points(&game_objects);
-        let mut light = Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone());
+        
+        let mut lights = vec![
+            Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone(), 300., 6.),
+            Light::new(glm::Vec3::new(0.5, 0.7, 0.1), glm::Vec2::new(100., 500.), 200., 3.),
+        ];
+        // let mut light = Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone(), 300., 6.);
 
         let event_loop = std::mem::replace(&mut self.event_loop, None);
         if let Some(el) = event_loop {
@@ -339,7 +342,7 @@ impl VulkanoDevice {
                     ..
                 } => {
                     mouse_pos = glm::Vec2::new(position.x as f32, position.y as f32);
-                    light.center = mouse_pos.clone();
+                    (&mut lights[0]).center = mouse_pos;
                 }
                 Event::RedrawEventsCleared => {
                     let dimensions = surface.window().inner_size();
@@ -389,7 +392,21 @@ impl VulkanoDevice {
                     )
                     .unwrap();
 
-                    let (vertices, indices) = create_vertices(&game_objects, &light);
+
+                    let mut vertices = Vec::new();
+                    let mut indices = Vec::new();
+                    let mut index_offset = 0;
+
+                    let (vertices_local, indices_local ) = create_vertices(&env_objects, &lights[0], 0, index_offset);
+
+                    index_offset = vertices_local.len() as u32;
+                    vertices.extend(vertices_local);
+                    indices.extend(indices_local);
+
+                    let (vertices_local, indices_local) = create_vertices(&env_objects, &lights[1], 0, index_offset);
+
+                    vertices.extend(vertices_local);
+                    indices.extend(indices_local);
 
                     let vertex_buffer = CpuAccessibleBuffer::from_iter(
                         device.clone(),
@@ -415,8 +432,27 @@ impl VulkanoDevice {
                         resolution: res,
                         dimensions: [dimensions.width as f32, dimensions.height as f32],
                         time_passed,
+                        amount_of_lights: lights.len() as u32,
                     };
                     time_passed += 0.01;
+
+                    let light_buffer = {
+                        let data_iter = lights.iter().map(|l| l.get_buffer_data());
+                        
+                        CpuAccessibleBuffer::from_iter(
+                            device.clone(),
+                            BufferUsage::all(),
+                            false,
+                            data_iter,
+                        )
+                        .unwrap()
+                    };
+
+                    let set = PersistentDescriptorSet::new(
+                        pipeline.layout().set_layouts().get(0).unwrap().clone(),
+                        [WriteDescriptorSet::buffer(0, light_buffer)],
+                    )
+                    .unwrap();
 
                     builder
                         .begin_render_pass(
@@ -430,6 +466,12 @@ impl VulkanoDevice {
                         .set_viewport(0, [viewport.clone()])
                         .bind_pipeline_graphics(pipeline.clone())
                         .push_constants(pipeline.layout().clone(), 0, push_constants)
+                        .bind_descriptor_sets(
+                            PipelineBindPoint::Graphics,
+                            pipeline.layout().clone(),
+                            0,
+                            set,
+                        )
                         .bind_vertex_buffers(0, vertex_buffer.clone())
                         .bind_index_buffer(index_buffer.clone())
                         .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
@@ -470,23 +512,26 @@ impl VulkanoDevice {
 
 // TODO: Draw a concave polygon more efficiently
 fn create_vertices(
-    game_objects: &Vec<Box<dyn GameObject>>,
+    env_objects: &Vec<Box<dyn EnvironmentObject>>,
     light: &Light,
+    light_index: usize,
+    index_offset: u32,
 ) -> (Vec<Vertex>, Vec<u32>) {
-    let light_polygon = light.calculate_light_polygon(game_objects);
+    let pos_z = light_index as f32 + 1.;
+    let light_polygon = light.calculate_light_polygon(env_objects);
     let light_vertices = light_polygon.iter().map(|p| Vertex {
-        position: [p.x, p.y],
+        position: [p.x, p.y, pos_z],
     });
 
     let mut vertices = vec![Vertex {
-        position: [light.center.x, light.center.y],
+        position: [light.center.x, light.center.y, pos_z],
     }];
     vertices.extend(light_vertices);
     while vertices.len() < 3 {
-        vertices.push(Vertex { position: [0., 0.] });
+        vertices.push(Vertex { position: [0., 0., pos_z] });
     }
 
-    let indices = calculate_indices_polygon(vertices.len() - 1);
+    let indices = calculate_indices_polygon(vertices.len() - 1, index_offset);
 
     (vertices, indices)
 }
