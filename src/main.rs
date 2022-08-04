@@ -22,9 +22,11 @@ use rand::prelude::*;
 
 mod vulkano_backend;
 use vulkano::pipeline::compute;
-use vulkano_backend::{compute_device::{
-    self, //ComputeDevice, PushConstants, BUFFER_SIZE, HEIGHT, WIDTH,
-}, vulkano_device::{self, VulkanoDevice}};
+use vulkano_backend::{
+    compute_device::{self}, //ComputeDevice, PushConstants, BUFFER_SIZE, HEIGHT, WIDTH,},
+    vulkano_device::{self, VulkanoDevice},
+    test_multi_render_passes::multi_main
+};
 
 mod game_object;
 
@@ -42,13 +44,9 @@ struct MousePos {
 }
 
 fn main() {
-    let mut v_device = VulkanoDevice::new_with_initialization();
-    // let run_v_device  = v_device .clone();
-    v_device.run();
+    // let mut v_device = VulkanoDevice::new_with_initialization();
     // v_device.run();
-    // temp.run();
-    let test = v_device;
-    // vulkano_device::main_vulkano();
+    multi_main();
 }
 
 // fn start_app() {
