@@ -45,13 +45,13 @@ pub fn calculate_clockwise_points(mut points: Vec<glm::Vec2>, center: glm::Vec2)
     points
 }
 
-pub fn calculate_indices_polygon(triangle_amount: usize, index_offset: u32) -> Vec<u32> {
+pub fn calculate_indices_polygon(triangle_amount: usize) -> Vec<u32> {
     let mut indices = Vec::with_capacity(triangle_amount * 3);
     for i in 0..triangle_amount {
         let index = (i + 1) as u32;
-        indices.push(index_offset);
-        indices.push(index + index_offset);
-        indices.push(index % triangle_amount as u32 + 1 + index_offset);
+        indices.push(0);
+        indices.push(index);
+        indices.push(index % triangle_amount as u32 + 1);
     }
 
     indices

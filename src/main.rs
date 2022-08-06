@@ -44,9 +44,8 @@ struct MousePos {
 }
 
 fn main() {
-    // let mut v_device = VulkanoDevice::new_with_initialization();
-    // v_device.run();
-    multi_main();
+    let mut v_device = VulkanoDevice::new_with_initialization();
+    v_device.run();
 }
 
 // fn start_app() {

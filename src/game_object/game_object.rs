@@ -230,15 +230,48 @@ impl EnvironmentObject for DottedLine {
 
 pub struct Light {
     pub color: glm::Vec3,
-    pub center: glm::Vec2,
-    pub radius: f32,
+    center: glm::Vec2,
+    radius: f32,
+    max_radius: f32,
     pub brightness: f32,
+    polygon: Option<Vec<glm::Vec2>>,
 }
 
 impl Light {
     pub fn new(color: glm::Vec3, center: glm::Vec2, radius: f32, brightness: f32) -> Self {
-        Light { color, center, radius, brightness }
+        Light { color, center, radius, max_radius: radius, brightness, polygon: None }
     }
+
+    pub fn new_with_max_radius(color: glm::Vec3, center: glm::Vec2, radius: f32, max_radius: f32, brightness: f32) -> Self {
+        Light { color, center, radius, max_radius, brightness, polygon: None }
+    }
+
+    pub fn get_center<'a>(&'a self) -> &'a glm::Vec2 {
+        return &self.center;
+    }
+
+    pub fn set_center(&mut self, center: glm::Vec2) {
+        self.center = center;
+        self.polygon = None;
+    }
+
+    pub fn get_radius(&self) -> f32 {
+        return self.radius;
+    }
+
+    pub fn set_radius(&mut self, radius: f32) {
+        self.radius = radius;
+        self.maybe_set_max_radius(radius);
+    }
+
+    pub fn maybe_set_max_radius(&mut self, max_radius: f32) {
+        if self.max_radius > max_radius {
+            return;
+        }
+        self.max_radius = max_radius;
+        self.polygon = None;
+    }
+
 
     pub fn get_buffer_data(&self) -> [f32; 8] {
         [
@@ -254,9 +287,13 @@ impl Light {
     }
 
     pub fn calculate_light_polygon(
-        &self,
+        &mut self,
         env_objects: &Vec<Box<dyn EnvironmentObject>>,
     ) -> Vec<glm::Vec2> {
+        if let Some(polygon) = &self.polygon {
+            return polygon.clone();
+        }
+
         let mut p_rays_go: Vec<(&Box<dyn EnvironmentObject>, Vec<Ray>)> = Vec::new(); // Vec::with_capacity(points.len());
 
         for go in env_objects {
@@ -313,6 +350,10 @@ impl Light {
             }
         }
 
-        calculate_clockwise_points(actual_points, self.center)
+        let polygon = calculate_clockwise_points(actual_points, self.center);
+        let polygon_c = polygon.clone();
+        self.polygon = Some(polygon);
+
+        polygon_c
     }
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
+        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents, ClearColorImageInfo
     },
     descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::{
@@ -123,6 +123,7 @@ pub fn multi_main() {
                 image_extent: surface.window().inner_size().into(),
                 image_usage: ImageUsage {
                     input_attachment: true,
+                    transfer_dst: true,
                     ..ImageUsage::color_attachment()
                 },
                 composite_alpha: surface_capabilities
@@ -179,37 +180,7 @@ pub fn multi_main() {
     let vertex_buffer2 =
         CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, vertices)
             .unwrap();
-
-    let vertices = [
-        Vertex {
-            position: [-1., -1.],
-            color: [0., 0., 0., -1.],
-        },
-        Vertex {
-            position: [1., -1.],
-            color: [0., 0., 0., -1.],
-        },
-        Vertex {
-            position: [-1., 1.],
-            color: [0., 0., 0., -1.],
-        },
-        // Vertex {
-        //     position: [-1., 1.],
-        //     color: [0., 0., 0., -1.],
-        // },
-        // Vertex {
-        //     position: [1., -1.],
-        //     color: [0., 0., 0., -1.],
-        // },
-        // Vertex {
-        //     position: [1., 1.],
-        //     color: [0., 0., 0., -1.],
-        // },
-    ];
-    let vertex_buffer4 =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, vertices)
-            .unwrap();
-
+            
     mod vs {
         vulkano_shaders::shader! {
             ty: "vertex",
@@ -420,30 +391,12 @@ pub fn multi_main() {
             )
             .unwrap();
 
+            let fb_image = framebuffers[image_num].attachments()[0].image();
+            let mut clear_color_image_info = ClearColorImageInfo::image(fb_image).clone();
+            clear_color_image_info.image_layout = ImageLayout::General;
+
             builder
-                .begin_render_pass(
-                    RenderPassBeginInfo {
-                        // The clear value is `None`, because our renderpass was created with
-                        // `LoadOp::Load` so we don't want to clear it.
-                        clear_values: vec![None],
-                        ..RenderPassBeginInfo::framebuffer(framebuffers[image_num].clone())
-                    },
-                    SubpassContents::Inline,
-                )
-                .unwrap()
-                .set_viewport(0, [viewport.clone()])
-                .bind_pipeline_graphics(pipeline.clone())
-                .bind_vertex_buffers(0, vertex_buffer4.clone())
-                // We bind the descriptor set with the swapchain image as our input attachment.
-                .bind_descriptor_sets(
-                    PipelineBindPoint::Graphics,
-                    pipeline.layout().clone(),
-                    0,
-                    descriptor_sets[image_num].clone(),
-                )
-                .draw(vertex_buffer4.len() as u32, 1, 0, 0)
-                .unwrap()
-                .end_render_pass()
+                .clear_color_image(clear_color_image_info)
                 .unwrap();
 
             builder

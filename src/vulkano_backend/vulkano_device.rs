@@ -1,16 +1,22 @@
 use bytemuck::{Pod, Zeroable};
-use std::sync::Arc;
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime}, alloc::System,
+    cmp::max,
+};
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
     command_buffer::{
-        AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassContents,
+        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage, RenderPassBeginInfo,
+        SubpassContents,
     },
-    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
+    descriptor_set::{DescriptorSet, PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
-    image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
+    image::ImageAspects,
+    image::{view::ImageView, ImageAccess, ImageLayout, ImageUsage, SwapchainImage},
     impl_vertex,
     instance::{Instance, InstanceCreateInfo},
     pipeline::{
@@ -21,7 +27,10 @@ use vulkano::{
         },
         GraphicsPipeline, Pipeline, PipelineBindPoint,
     },
-    render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass},
+    render_pass::{
+        AttachmentDescription, AttachmentReference, Framebuffer, FramebufferCreateInfo, LoadOp,
+        RenderPass, RenderPassCreateInfo, StoreOp, Subpass, SubpassDescription,
+    },
     shader::ShaderModule,
     swapchain::{
         acquire_next_image, AcquireError, Surface, Swapchain, SwapchainCreateInfo,
@@ -29,9 +38,10 @@ use vulkano::{
     },
     sync::{self, FlushError, GpuFuture},
 };
+use rand::Rng;
 use vulkano_win::VkSurfaceBuild;
 use winit::{
-    event::{Event, WindowEvent},
+    event::{Event, KeyboardInput, VirtualKeyCode, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
@@ -45,7 +55,7 @@ use nalgebra_glm as glm;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 struct Vertex {
-    position: [f32; 3],
+    position: [f32; 2],
 }
 impl_vertex!(Vertex, position);
 
@@ -55,8 +65,11 @@ struct PushConstants {
     mouse_pos: glm::Vec2,
     resolution: [f32; 2],
     dimensions: [f32; 2],
+    light_center: glm::Vec2,
+    light_color: glm::Vec3,
+    light_brightness: f32,
+    light_radius: f32,
     time_passed: f32,
-    amount_of_lights: u32,
 }
 
 pub struct VulkanoDevice {
@@ -69,6 +82,7 @@ pub struct VulkanoDevice {
     pipeline: Arc<GraphicsPipeline>,
     viewport: Viewport,
     framebuffers: Vec<Arc<Framebuffer>>,
+    descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
 }
 
 impl VulkanoDevice {
@@ -148,7 +162,11 @@ impl VulkanoDevice {
                     min_image_count: surface_capabilities.min_image_count,
                     image_format,
                     image_extent: surface.window().inner_size().into(),
-                    image_usage: ImageUsage::color_attachment(),
+                    image_usage: ImageUsage {
+                        input_attachment: true,
+                        transfer_dst: true,
+                        ..ImageUsage::color_attachment()
+                    },
                     composite_alpha: surface_capabilities
                         .supported_composite_alpha
                         .iter()
@@ -178,20 +196,49 @@ impl VulkanoDevice {
         let vs = vs::load(device.clone()).unwrap();
         let fs = fs::load(device.clone()).unwrap();
 
-        let render_pass = vulkano::single_pass_renderpass!(
+        let render_pass = RenderPass::new(
             device.clone(),
-            attachments: {
-                color: {
-                    load: Clear,
-                    store: Store,
-                    format: swapchain.image_format(),
-                    samples: 1,
-                }
+            RenderPassCreateInfo {
+                attachments: vec![AttachmentDescription {
+                    format: Some(swapchain.image_format()),
+                    // We keep the previous contents of the swapchain image unchanged...
+                    load_op: LoadOp::Load,
+                    // ...and store the result.
+                    store_op: StoreOp::Store,
+                    // When acquired, images in the swapchain are in the `Undefined` layout which
+                    // must be transitioned into a different one if you want to use the data. You can
+                    // use any other layout, but `General` is the only one which works for all purposes.
+                    initial_layout: ImageLayout::General,
+                    // The only valid image layout for presenting a swapchain image to the surface is
+                    // `PresentSrc`.
+                    final_layout: ImageLayout::PresentSrc,
+                    ..Default::default()
+                }],
+                subpasses: vec![SubpassDescription {
+                    color_attachments: vec![Some(AttachmentReference {
+                        attachment: 0,
+                        // The only valid image layouts for color attachments are
+                        // `ColorAttachmentOptimal` and `General`.
+                        layout: ImageLayout::General,
+                        ..Default::default()
+                    })],
+                    input_attachments: vec![Some(AttachmentReference {
+                        attachment: 0,
+                        // The only valid layouts for input attachments are
+                        // `ShaderReadOnlyOptimal` and `General`.
+                        layout: ImageLayout::General,
+                        aspects: ImageAspects {
+                            // We select the color aspect. Not that there is anything else, we will be
+                            // binding a swapchain image.
+                            color: true,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })],
+                    ..Default::default()
+                }],
+                ..Default::default()
             },
-            pass: {
-                color: [color],
-                depth_stencil: {}
-            }
         )
         .unwrap();
 
@@ -212,8 +259,8 @@ impl VulkanoDevice {
             depth_range: 0.0..1.0,
         };
 
-        let mut framebuffers =
-            window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
+        let (mut framebuffers, mut descriptor_sets) =
+            window_size_dependent_setup(&images, render_pass.clone(), &pipeline, &mut viewport);
 
         VulkanoDevice {
             event_loop: Some(event_loop),
@@ -225,6 +272,7 @@ impl VulkanoDevice {
             pipeline,
             viewport,
             framebuffers,
+            descriptor_sets,
         }
     }
 
@@ -239,6 +287,7 @@ impl VulkanoDevice {
         let mut pipeline = self.pipeline.clone();
         let mut viewport = self.viewport.clone();
         let mut framebuffers = self.framebuffers.clone();
+        let mut descriptor_sets = self.descriptor_sets.clone();
 
         let mut mouse_pos = glm::Vec2::new(0., 0.);
         let mut time_passed = 0.;
@@ -269,58 +318,31 @@ impl VulkanoDevice {
         let gap_amount = 30;
 
         env_objects.push(Box::new(DottedLine::new(
-            start_p.clone(),
-            end_p.clone(),
+            start_p,
+            end_p,
             gap_amount,
         )));
 
-        let start_p1 = glm::Vec2::new(100., 200.);
-        let end_p1 = glm::Vec2::new(700., 300.);
+        let start_p = glm::Vec2::new(100., 400.);
+        let end_p = glm::Vec2::new(700., 500.);
         env_objects.push(Box::new(DottedLine::new(
-            start_p1.clone(),
-            end_p1.clone(),
+            start_p,
+            end_p,
             gap_amount,
         )));
 
-        // let start_p2 = glm::Vec2::new(200., 100.);
-        // let end_p2 = glm::Vec2::new(300., 700.);
-        // env_objects.push(Box::new(DottedLine::new(
-        //     start_p2.clone(),
-        //     end_p2.clone(),
-        //     gap_amount,
-        // )));
-
-        // let start_p3 = glm::Vec2::new(300., 100.);
-        // let end_p3 = glm::Vec2::new(400., 700.);
-        // env_objects.push(Box::new(DottedLine::new(
-        //     start_p3.clone(),
-        //     end_p3.clone(),
-        //     gap_amount,
-        // )));
-
-        // let size = (end_p - start_p).magnitude() / (gap_amount as f32 * 2. + 1.);
-        // for i in 0..gap_amount {
-        //     let i_f32 = i as f32;
-        //     let offset = i_f32 * size * 2.;
-        //     let offset_0 = glm::Vec2::new(offset, 0.);
-        //     let offset_1 = glm::Vec2::new(offset + size, 0.);
-        //     env_objects.push(Box::new(Line::new(
-        //         start_p + offset_0,
-        //         start_p + offset_1,
-        //     )));
-        // }
-        // env_objects.push(
-        //     Box::new(Line::new(
-        //         end_p - glm::Vec2::new(size, 0.),
-        //         end_p,
-        //     ))
-        // );
-        
         let mut lights = vec![
-            Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone(), 300., 6.),
-            Light::new(glm::Vec3::new(0.5, 0.7, 0.1), glm::Vec2::new(100., 500.), 200., 3.),
+            Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone(), 300., 3.),
         ];
-        // let mut light = Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone(), 300., 6.);
+
+        let aol_delta = 5;
+        let mut amount_of_lights = 20;
+        let mut last_aol_up = SystemTime::now();
+        let mut last_aol_down = SystemTime::now();
+        let mut last_updated_lights = SystemTime::now();
+        let max_update_aol_millis = 150;
+        let max_update_lights_millis = 1500;
+        generate_random_lights(&mut lights, amount_of_lights);
 
         let event_loop = std::mem::replace(&mut self.event_loop, None);
         if let Some(el) = event_loop {
@@ -342,7 +364,60 @@ impl VulkanoDevice {
                     ..
                 } => {
                     mouse_pos = glm::Vec2::new(position.x as f32, position.y as f32);
-                    (&mut lights[0]).center = mouse_pos;
+                    (&mut lights[0]).set_center(mouse_pos);
+                }
+                Event::WindowEvent {
+                    event:
+                        WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    virtual_keycode: Some(VirtualKeyCode::R),
+                                    ..
+                                },
+                            ..
+                        },
+                    ..
+                } => {
+                    if last_updated_lights.elapsed().unwrap().as_millis() > max_update_lights_millis {
+                        generate_random_lights(&mut lights, amount_of_lights);
+                        last_updated_lights = SystemTime::now();
+                    }
+                }
+                Event::WindowEvent {
+                    event:
+                        WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    virtual_keycode: Some(VirtualKeyCode::Up),
+                                    ..
+                                },
+                            ..
+                        },
+                    ..
+                } => {
+                    if last_aol_up.elapsed().unwrap().as_millis() > max_update_aol_millis {
+                        amount_of_lights += aol_delta;
+                        println!("{}", amount_of_lights);
+                        last_aol_up = SystemTime::now();
+                    }
+                }
+                Event::WindowEvent {
+                    event:
+                        WindowEvent::KeyboardInput {
+                            input:
+                                KeyboardInput {
+                                    virtual_keycode: Some(VirtualKeyCode::Down),
+                                    ..
+                                },
+                            ..
+                        },
+                    ..
+                } => {
+                    if last_aol_down.elapsed().unwrap().as_millis() > max_update_aol_millis {
+                        amount_of_lights = max(0, amount_of_lights - aol_delta);
+                        println!("{}", amount_of_lights);
+                        last_aol_down = SystemTime::now();
+                    }
                 }
                 Event::RedrawEventsCleared => {
                     let dimensions = surface.window().inner_size();
@@ -364,9 +439,10 @@ impl VulkanoDevice {
                             };
 
                         swapchain = new_swapchain;
-                        framebuffers = window_size_dependent_setup(
+                        (framebuffers, descriptor_sets) = window_size_dependent_setup(
                             &new_images,
                             render_pass.clone(),
+                            &pipeline,
                             &mut viewport,
                         );
                         recreate_swapchain = false;
@@ -392,92 +468,73 @@ impl VulkanoDevice {
                     )
                     .unwrap();
 
-
-                    let mut vertices = Vec::new();
-                    let mut indices = Vec::new();
-                    let mut index_offset = 0;
-
-                    let (vertices_local, indices_local ) = create_vertices(&env_objects, &lights[0], 0, index_offset);
-
-                    index_offset = vertices_local.len() as u32;
-                    vertices.extend(vertices_local);
-                    indices.extend(indices_local);
-
-                    let (vertices_local, indices_local) = create_vertices(&env_objects, &lights[1], 0, index_offset);
-
-                    vertices.extend(vertices_local);
-                    indices.extend(indices_local);
-
-                    let vertex_buffer = CpuAccessibleBuffer::from_iter(
-                        device.clone(),
-                        BufferUsage::all(),
-                        false,
-                        vertices,
-                    )
-                    .unwrap();
-
-                    let index_buffer = CpuAccessibleBuffer::from_iter(
-                        device.clone(),
-                        BufferUsage::all(),
-                        false,
-                        indices,
-                    )
-                    .unwrap();
-
+                    let fb_image = framebuffers[image_num].attachments()[0].image();
                     let dim = surface.window().inner_size();
                     let res = [dim.width as f32, dim.height as f32];
 
-                    let push_constants = PushConstants {
-                        mouse_pos: mouse_pos.into(),
-                        resolution: res,
-                        dimensions: [dimensions.width as f32, dimensions.height as f32],
-                        time_passed,
-                        amount_of_lights: lights.len() as u32,
-                    };
-                    time_passed += 0.01;
+                    builder
+                        .clear_color_image(ClearColorImageInfo::image(fb_image).clone())
+                        .unwrap();
 
-                    let light_buffer = {
-                        let data_iter = lights.iter().map(|l| l.get_buffer_data());
-                        
-                        CpuAccessibleBuffer::from_iter(
+                    for light in lights.iter_mut() {
+                        let (vertices, indices) = create_vertices(&env_objects, light);
+
+                        let vertex_buffer = CpuAccessibleBuffer::from_iter(
                             device.clone(),
                             BufferUsage::all(),
                             false,
-                            data_iter,
+                            vertices,
                         )
-                        .unwrap()
-                    };
-
-                    let set = PersistentDescriptorSet::new(
-                        pipeline.layout().set_layouts().get(0).unwrap().clone(),
-                        [WriteDescriptorSet::buffer(0, light_buffer)],
-                    )
-                    .unwrap();
-
-                    builder
-                        .begin_render_pass(
-                            RenderPassBeginInfo {
-                                clear_values: vec![Some([0.0, 0.0, 0.0, 1.0].into())],
-                                ..RenderPassBeginInfo::framebuffer(framebuffers[image_num].clone())
-                            },
-                            SubpassContents::Inline,
-                        )
-                        .unwrap()
-                        .set_viewport(0, [viewport.clone()])
-                        .bind_pipeline_graphics(pipeline.clone())
-                        .push_constants(pipeline.layout().clone(), 0, push_constants)
-                        .bind_descriptor_sets(
-                            PipelineBindPoint::Graphics,
-                            pipeline.layout().clone(),
-                            0,
-                            set,
-                        )
-                        .bind_vertex_buffers(0, vertex_buffer.clone())
-                        .bind_index_buffer(index_buffer.clone())
-                        .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
-                        .unwrap()
-                        .end_render_pass()
                         .unwrap();
+
+                        let index_buffer = CpuAccessibleBuffer::from_iter(
+                            device.clone(),
+                            BufferUsage::all(),
+                            false,
+                            indices,
+                        )
+                        .unwrap();
+
+                        let push_constants = PushConstants {
+                            mouse_pos: mouse_pos.into(),
+                            resolution: res,
+                            dimensions: [dimensions.width as f32, dimensions.height as f32],
+                            light_center: light.get_center().clone(),
+                            light_color: light.color.clone(),
+                            light_brightness: light.brightness,
+                            light_radius: light.get_radius(),
+                            time_passed,
+                        };
+
+                        builder
+                            .begin_render_pass(
+                                RenderPassBeginInfo {
+                                    clear_values: vec![None],
+                                    ..RenderPassBeginInfo::framebuffer(
+                                        framebuffers[image_num].clone(),
+                                    )
+                                },
+                                SubpassContents::Inline,
+                            )
+                            .unwrap()
+                            .set_viewport(0, [viewport.clone()])
+                            .bind_pipeline_graphics(pipeline.clone())
+                            .push_constants(pipeline.layout().clone(), 0, push_constants)
+                            .bind_descriptor_sets(
+                                PipelineBindPoint::Graphics,
+                                pipeline.layout().clone(),
+                                0,
+                                descriptor_sets[image_num].clone(),
+                            )
+                            .bind_vertex_buffers(0, vertex_buffer.clone())
+                            .bind_index_buffer(index_buffer.clone())
+                            .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
+                            .unwrap()
+                            .end_render_pass()
+                            .unwrap();
+                    }
+
+                    time_passed += 0.01;
 
                     let command_buffer = builder.build().unwrap();
 
@@ -513,38 +570,83 @@ impl VulkanoDevice {
 // TODO: Draw a concave polygon more efficiently
 fn create_vertices(
     env_objects: &Vec<Box<dyn EnvironmentObject>>,
-    light: &Light,
-    light_index: usize,
-    index_offset: u32,
+    light: &mut Light,
 ) -> (Vec<Vertex>, Vec<u32>) {
-    let pos_z = light_index as f32 + 1.;
     let light_polygon = light.calculate_light_polygon(env_objects);
     let light_vertices = light_polygon.iter().map(|p| Vertex {
-        position: [p.x, p.y, pos_z],
+        position: [p.x, p.y],
     });
 
     let mut vertices = vec![Vertex {
-        position: [light.center.x, light.center.y, pos_z],
+        position: [light.get_center().x, light.get_center().y],
     }];
     vertices.extend(light_vertices);
     while vertices.len() < 3 {
-        vertices.push(Vertex { position: [0., 0., pos_z] });
+        vertices.push(Vertex { position: [0., 0.] });
     }
 
-    let indices = calculate_indices_polygon(vertices.len() - 1, index_offset);
+    let indices = calculate_indices_polygon(vertices.len() - 1);
 
     (vertices, indices)
+}
+
+fn generate_random_lights(lights: &mut Vec<Light>, amount_of_lights: usize) {
+    if lights.len() > 1 {
+        lights.drain(1..);
+    }
+
+    let colors = vec![
+        glm::Vec3::new(0.85, 0.33, 0.04),
+        glm::Vec3::new(0.23, 0.85, 0.09),
+        glm::Vec3::new(0.85, 0.06, 0.2),
+        glm::Vec3::new(0.09, 0.7, 0.7),
+        glm::Vec3::new(0.85, 0.06, 0.06),
+    ];
+
+    let positions = vec![
+        glm::Vec2::new(101., 101.),
+        glm::Vec2::new(351., 101.),
+        glm::Vec2::new(701., 101.),
+        glm::Vec2::new(101., 351.),
+        glm::Vec2::new(351., 351.),
+        glm::Vec2::new(701., 351.),
+        glm::Vec2::new(101., 551.),
+        glm::Vec2::new(351., 551.),
+        glm::Vec2::new(701., 551.),
+    ];
+    
+    let mut rng = rand::thread_rng();
+    for i in 0..amount_of_lights {
+        let color_offset = glm::Vec3::new(
+            rng.gen_range(0.0..0.2) - 0.1,
+            rng.gen_range(0.0..0.2) - 0.1,
+            rng.gen_range(0.0..0.2) - 0.1,
+        );
+        lights.push(
+            Light::new(
+                colors[i % colors.len()] + color_offset,
+                glm::Vec2::new(rng.gen_range(31.0..771.0), rng.gen_range(31.0..571.0)),
+                rng.gen_range(100.0..200.0),
+                // 100.0,
+                rng.gen_range(0.2..0.8)
+            )
+        );
+    }
 }
 
 fn window_size_dependent_setup(
     images: &[Arc<SwapchainImage<Window>>],
     render_pass: Arc<RenderPass>,
+    pipeline: &Arc<GraphicsPipeline>,
     viewport: &mut Viewport,
-) -> Vec<Arc<Framebuffer>> {
+) -> (
+    Vec<Arc<Framebuffer>>,
+    Arc<Vec<Arc<PersistentDescriptorSet>>>,
+) {
     let dimensions = images[0].dimensions().width_height();
     viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
 
-    images
+    let framebuffers = images
         .iter()
         .map(|image| {
             let view = ImageView::new_default(image.clone()).unwrap();
@@ -557,5 +659,24 @@ fn window_size_dependent_setup(
             )
             .unwrap()
         })
-        .collect::<Vec<_>>()
+        .collect::<Vec<_>>();
+
+    // As there are multiple swapchain images, we need to create one descriptor set for each and
+    // select the corrent one for the frame when drawing it to it. The descriptor set tells the
+    // fragment shader which image to use as the input attachment.
+    let descriptor_sets = images
+        .iter()
+        .map(|image| {
+            PersistentDescriptorSet::new(
+                pipeline.layout().set_layouts()[0].clone(),
+                [WriteDescriptorSet::image_view(
+                    0,
+                    ImageView::new_default(image.clone()).unwrap(),
+                )],
+            )
+            .unwrap()
+        })
+        .collect();
+
+    (framebuffers, Arc::new(descriptor_sets))
 }
