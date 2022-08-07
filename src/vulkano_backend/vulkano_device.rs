@@ -1,21 +1,25 @@
 use bytemuck::{Pod, Zeroable};
+use rand::Rng;
 use std::{
-    sync::Arc,
-    time::{Duration, SystemTime}, alloc::System,
+    alloc::System,
     cmp::max,
+    sync::Arc,
+    time::{Duration, SystemTime},
 };
 use vulkano::{
     buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
     command_buffer::{
         AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage, RenderPassBeginInfo,
-        SubpassContents,
+        SubpassContents, PrimaryAutoCommandBuffer
     },
     descriptor_set::{DescriptorSet, PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
+    format::Format,
     image::ImageAspects,
+    image::ImageViewAbstract,
     image::{view::ImageView, ImageAccess, ImageLayout, ImageUsage, SwapchainImage},
     impl_vertex,
     instance::{Instance, InstanceCreateInfo},
@@ -38,7 +42,6 @@ use vulkano::{
     },
     sync::{self, FlushError, GpuFuture},
 };
-use rand::Rng;
 use vulkano_win::VkSurfaceBuild;
 use winit::{
     event::{Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -51,6 +54,14 @@ use crate::game_object::{
     help_functions::{calculate_indices_polygon, get_all_points},
 };
 use nalgebra_glm as glm;
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+struct VertexTest {
+    position: [f32; 2],
+    color: [f32; 3],
+}
+impl_vertex!(VertexTest, position, color);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
@@ -72,21 +83,359 @@ struct PushConstants {
     time_passed: f32,
 }
 
+pub struct Triangle {
+    vertex_buffer: Arc<CpuAccessibleBuffer<[VertexTest]>>,
+    index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
+}
+
+impl Triangle {
+    pub fn new(queue: &Arc<Queue>) -> Self {
+        let vertices = vec![
+            VertexTest {
+                position: [-0.25, -0.5],
+                color: [0.3, 0.9, 0.7],
+            },
+            VertexTest {
+                position: [0.5, 0.0],
+                color: [0.7, 0.1, 0.3],
+            },
+            VertexTest {
+                position: [-0.1, 0.25],
+                color: [0.7, 0.1, 0.3],
+            },
+        ];
+
+        let indices = vec![0, 1, 2];
+
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+            queue.device().clone(),
+            BufferUsage::vertex_buffer(),
+            false,
+            vertices,
+        )
+        .unwrap();
+
+        let index_buffer = CpuAccessibleBuffer::from_iter(
+            queue.device().clone(),
+            BufferUsage::index_buffer(),
+            false,
+            indices,
+        )
+        .unwrap();
+
+        Self {
+            vertex_buffer,
+            index_buffer,
+        }
+    }
+
+    pub fn draw(
+        &self,
+        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
+        framebuffer: Arc<Framebuffer>,
+        descriptor_set: Arc<PersistentDescriptorSet>,
+        pipeline: Arc<GraphicsPipeline>,
+        viewport: Viewport,
+    ) {
+        builder
+            .begin_render_pass(
+                RenderPassBeginInfo {
+                    clear_values: vec![None],
+                    ..RenderPassBeginInfo::framebuffer(framebuffer)
+                },
+                SubpassContents::Inline,
+            )
+            .unwrap()
+            .set_viewport(0, [viewport])
+            .bind_pipeline_graphics(pipeline.clone())
+            .bind_vertex_buffers(0, self.vertex_buffer.clone())
+            .bind_index_buffer(self.index_buffer.clone())
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                pipeline.layout().clone(),
+                0,
+                descriptor_set,
+            )
+            .draw_indexed(self.vertex_buffer.len() as u32, 1, 0, 0, 0)
+            .unwrap()
+            .end_render_pass()
+            .unwrap();
+    }
+}
+
 pub struct VulkanoDevice {
-    event_loop: Option<EventLoop<()>>,
-    surface: Arc<Surface<Window>>,
-    device: Arc<Device>,
     queue: Arc<Queue>,
-    swapchain: Arc<Swapchain<Window>>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
-    viewport: Viewport,
-    framebuffers: Vec<Arc<Framebuffer>>,
-    descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
+    // command_buffer_builder: Arc<Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>>,
+    descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
+    // descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
+    // event_loop: Option<EventLoop<()>>,
+    // surface: Arc<Surface<Window>>,
+    // device: Arc<Device>,
+    // queue: Arc<Queue>,
+    // swapchain: Arc<Swapchain<Window>>,
+    // render_pass: Arc<RenderPass>,
+    // viewport: Viewport,
+    // framebuffers: Vec<Arc<Framebuffer>>,
+    // descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
 }
 
 impl VulkanoDevice {
-    pub fn new_with_initialization() -> VulkanoDevice {
+    pub fn new(queue: Arc<Queue>, final_output_format: Format) -> Self {
+        let render_pass = RenderPass::new(
+            queue.device().clone(),
+            RenderPassCreateInfo {
+                attachments: vec![AttachmentDescription {
+                    format: Some(final_output_format),
+                    // We keep the previous contents of the swapchain image unchanged...
+                    load_op: LoadOp::Load,
+                    // ...and store the result.
+                    store_op: StoreOp::Store,
+                    // When acquired, images in the swapchain are in the `Undefined` layout which
+                    // must be transitioned into a different one if you want to use the data. You can
+                    // use any other layout, but `General` is the only one which works for all purposes.
+                    initial_layout: ImageLayout::General,
+                    final_layout: ImageLayout::PresentSrc,
+                    ..Default::default()
+                }],
+                subpasses: vec![SubpassDescription {
+                    color_attachments: vec![Some(AttachmentReference {
+                        attachment: 0,
+                        // The only valid image layouts for color attachments are
+                        // `ColorAttachmentOptimal` and `General`.
+                        layout: ImageLayout::General,
+                        ..Default::default()
+                    })],
+                    input_attachments: vec![Some(AttachmentReference {
+                        attachment: 0,
+                        // The only valid layouts for input attachments are
+                        // `ShaderReadOnlyOptimal` and `General`.
+                        layout: ImageLayout::General,
+                        aspects: ImageAspects {
+                            // We select the color aspect. Not that there is anything else, we will be
+                            // binding a swapchain image.
+                            color: true,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        mod vs {
+            vulkano_shaders::shader! {
+                ty: "vertex",
+                path: "src/shaders/test_shader.vert"
+            }
+        }
+
+        mod fs {
+            vulkano_shaders::shader! {
+                ty: "fragment",
+                path: "src/shaders/test_shader.frag"
+            }
+        }
+
+        let vs = vs::load(queue.device().clone()).unwrap();
+        let fs = fs::load(queue.device().clone()).unwrap();
+
+        let pipeline = GraphicsPipeline::start()
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .vertex_input_state(BuffersDefinition::new().vertex::<VertexTest>())
+            .input_assembly_state(InputAssemblyState::new())
+            .vertex_shader(vs.entry_point("main").unwrap(), ())
+            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+            .fragment_shader(fs.entry_point("main").unwrap(), ())
+            .build(queue.device().clone())
+            .unwrap();
+
+
+        Self {
+            queue,
+            render_pass,
+            pipeline,
+            // command_buffer_builder: Arc::new(None),
+            descriptor_sets: Vec::new(),
+        }
+    }
+
+    pub fn pass<F>(
+        &mut self,
+        before_future: F,
+        final_image: Arc<dyn ImageViewAbstract + 'static>,
+    ) -> Box<dyn GpuFuture>
+    where
+        F: GpuFuture + 'static,
+    {
+        let dims = final_image.image().dimensions().width_height();
+        let framebuffer = Framebuffer::new(
+            self.render_pass.clone(),
+            FramebufferCreateInfo {
+                attachments: vec![final_image.clone()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let mut builder = AutoCommandBufferBuilder::primary(
+            self.queue.device().clone(),
+            self.queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [dims[0] as f32, dims[1] as f32],
+            depth_range: 0.0..1.0,
+        };
+
+        let fb_image = framebuffer.attachments()[0].image();
+        let descriptor_set = PersistentDescriptorSet::new(
+            self.pipeline.layout().set_layouts()[0].clone(),
+            [WriteDescriptorSet::image_view(
+                0,
+                ImageView::new_default(final_image.image().clone()).unwrap(),
+            )],
+        )
+        .unwrap();
+
+        builder
+            .clear_color_image(ClearColorImageInfo::image(fb_image).clone())
+            .unwrap();
+
+        // let vertices = vec![
+        //     VertexTest {
+        //         position: [-0.5, -0.25],
+        //         color: [0.7, 0.1, 0.3],
+        //     },
+        //     VertexTest {
+        //         position: [0.0, 0.5],
+        //         color: [0.7, 0.1, 0.3],
+        //     },
+        //     VertexTest {
+        //         position: [0.25, -0.1],
+        //         color: [0.3, 0.9, 0.7],
+        //     },
+        // ];
+
+        // let indices = vec![0_u32, 1_u32, 2_u32];
+
+        // let vertex_buffer = CpuAccessibleBuffer::from_iter(
+        //     self.queue.device().clone(),
+        //     BufferUsage::vertex_buffer(),
+        //     false,
+        //     vertices,
+        // )
+        // .unwrap();
+
+        // let index_buffer = CpuAccessibleBuffer::from_iter(
+        //     self.queue.device().clone(),
+        //     BufferUsage::index_buffer(),
+        //     false,
+        //     indices,
+        // )
+        // .unwrap();
+
+        // let mut index_len = index_buffer.len();
+
+        // builder
+        //     .begin_render_pass(
+        //         RenderPassBeginInfo {
+        //             clear_values: vec![None],
+        //             ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
+        //         },
+        //         SubpassContents::Inline,
+        //     )
+        //     .unwrap()
+        //     .set_viewport(0, [viewport.clone()])
+        //     .bind_pipeline_graphics(self.pipeline.clone())
+        //     .bind_vertex_buffers(0, vertex_buffer)
+        //     .bind_index_buffer(index_buffer)
+        //     .bind_descriptor_sets(
+        //         PipelineBindPoint::Graphics,
+        //         self.pipeline.layout().clone(),
+        //         0,
+        //         descriptor_set.clone(),
+        //     )
+        //     .draw_indexed(index_len as u32, 1, 0, 0, 0)
+        //     .unwrap()
+        //     .end_render_pass()
+        //     .unwrap();
+
+        let vertices = vec![
+            VertexTest {
+                position: [-0.25, -0.5],
+                color: [0.3, 0.9, 0.7],
+            },
+            VertexTest {
+                position: [0.5, 0.0],
+                color: [0.7, 0.1, 0.3],
+            },
+            VertexTest {
+                position: [-0.1, 0.25],
+                color: [0.7, 0.1, 0.3],
+            },
+        ];
+
+        let indices = vec![0_u32, 1_u32, 2_u32];
+
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+            self.queue.device().clone(),
+            BufferUsage::vertex_buffer(),
+            false,
+            vertices,
+        )
+        .unwrap();
+
+        let index_buffer = CpuAccessibleBuffer::from_iter(
+            self.queue.device().clone(),
+            BufferUsage::index_buffer(),
+            false,
+            indices,
+        )
+        .unwrap();
+
+        let index_len = index_buffer.len();
+
+        builder
+            .begin_render_pass(
+                RenderPassBeginInfo {
+                    clear_values: vec![None],
+                    ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
+                },
+                SubpassContents::Inline,
+            )
+            .unwrap()
+            .set_viewport(0, [viewport.clone()])
+            .bind_pipeline_graphics(self.pipeline.clone())
+            .bind_vertex_buffers(0, vertex_buffer)
+            .bind_index_buffer(index_buffer)
+            .bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.pipeline.layout().clone(),
+                0,
+                descriptor_set,
+            )
+            .draw_indexed(index_len as u32, 1, 0, 0, 0)
+            .unwrap()
+            .end_render_pass()
+            .unwrap();
+
+        let cb = builder.build().unwrap();
+
+        before_future
+            .then_execute(self.queue.clone(), cb)
+            .unwrap()
+            .boxed()
+    }
+
+    pub fn old_new_with_initialization() {
         let required_extensions = vulkano_win::required_extensions();
 
         let instance = Instance::new(InstanceCreateInfo {
@@ -179,23 +528,6 @@ impl VulkanoDevice {
             .unwrap()
         };
 
-        mod vs {
-            vulkano_shaders::shader! {
-                ty: "vertex",
-                path: "src/shaders/basic_pipeline.vert"
-            }
-        }
-
-        mod fs {
-            vulkano_shaders::shader! {
-                ty: "fragment",
-                path: "src/shaders/basic_pipeline.frag"
-            }
-        }
-
-        let vs = vs::load(device.clone()).unwrap();
-        let fs = fs::load(device.clone()).unwrap();
-
         let render_pass = RenderPass::new(
             device.clone(),
             RenderPassCreateInfo {
@@ -242,7 +574,23 @@ impl VulkanoDevice {
         )
         .unwrap();
 
-        // TODO: Look into triangle strip in assembly_state
+        mod vs {
+            vulkano_shaders::shader! {
+                ty: "vertex",
+                path: "src/shaders/basic_pipeline.vert"
+            }
+        }
+
+        mod fs {
+            vulkano_shaders::shader! {
+                ty: "fragment",
+                path: "src/shaders/basic_pipeline.frag"
+            }
+        }
+
+        let vs = vs::load(device.clone()).unwrap();
+        let fs = fs::load(device.clone()).unwrap();
+
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
             .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
@@ -262,309 +610,308 @@ impl VulkanoDevice {
         let (mut framebuffers, mut descriptor_sets) =
             window_size_dependent_setup(&images, render_pass.clone(), &pipeline, &mut viewport);
 
-        VulkanoDevice {
-            event_loop: Some(event_loop),
-            surface,
-            device,
-            queue,
-            swapchain,
-            render_pass,
-            pipeline,
-            viewport,
-            framebuffers,
-            descriptor_sets,
-        }
+        //     VulkanoDevice {
+        //         event_loop: Some(event_loop),
+        //         surface,
+        //         device,
+        //         queue,
+        //         swapchain,
+        //         render_pass,
+        //         pipeline,
+        //         viewport,
+        //         framebuffers,
+        //         descriptor_sets,
     }
 
-    pub fn run(&mut self) {
-        let mut recreate_swapchain = false;
-        let mut previous_frame_end = Some(sync::now(self.device.clone()).boxed());
-        let surface = self.surface.clone();
-        let mut device = self.device.clone();
-        let mut queue = self.queue.clone();
-        let mut swapchain = self.swapchain.clone();
-        let mut render_pass = self.render_pass.clone();
-        let mut pipeline = self.pipeline.clone();
-        let mut viewport = self.viewport.clone();
-        let mut framebuffers = self.framebuffers.clone();
-        let mut descriptor_sets = self.descriptor_sets.clone();
+    // pub fn run(&mut self) {
+    //     let mut recreate_swapchain = false;
+    //     let mut previous_frame_end = Some(sync::now(self.device.clone()).boxed());
+    //     let surface = self.surface.clone();
+    //     let mut device = self.device.clone();
+    //     let mut queue = self.queue.clone();
+    //     let mut swapchain = self.swapchain.clone();
+    //     let mut render_pass = self.render_pass.clone();
+    //     let mut pipeline = self.pipeline.clone();
+    //     let mut viewport = self.viewport.clone();
+    //     let mut framebuffers = self.framebuffers.clone();
+    //     let mut descriptor_sets = self.descriptor_sets.clone();
 
-        let mut mouse_pos = glm::Vec2::new(0., 0.);
-        let mut time_passed = 0.;
-        let dimensions = surface.window().inner_size();
-        let sb_offset = -1.;
+    //     let mut mouse_pos = glm::Vec2::new(0., 0.);
+    //     let mut time_passed = 0.;
+    //     let dimensions = surface.window().inner_size();
+    //     let sb_offset = -1.;
 
-        // TODO: add debug to game objects as well
-        let mut env_objects: Vec<Box<dyn EnvironmentObject>> = vec![
-            Box::new(AABB::new(
-                glm::Vec2::new(sb_offset, sb_offset),
-                glm::Vec2::new(
-                    dimensions.width as f32 - sb_offset,
-                    dimensions.height as f32 - sb_offset,
-                ),
-            )),
-            Box::new(Line::new(
-                glm::Vec2::new(200., 100.),
-                glm::Vec2::new(400., 100.),
-            )),
-            Box::new(Line::new(
-                glm::Vec2::new(100., 150.),
-                glm::Vec2::new(800., 150.),
-            )),
-        ];
+    //     // TODO: add debug to game objects as well
+    //     let mut env_objects: Vec<Box<dyn EnvironmentObject>> = vec![
+    //         Box::new(AABB::new(
+    //             glm::Vec2::new(sb_offset, sb_offset),
+    //             glm::Vec2::new(
+    //                 dimensions.width as f32 - sb_offset,
+    //                 dimensions.height as f32 - sb_offset,
+    //             ),
+    //         )),
+    //         Box::new(Line::new(
+    //             glm::Vec2::new(200., 100.),
+    //             glm::Vec2::new(400., 100.),
+    //         )),
+    //         Box::new(Line::new(
+    //             glm::Vec2::new(100., 150.),
+    //             glm::Vec2::new(800., 150.),
+    //         )),
+    //     ];
 
-        let start_p = glm::Vec2::new(100., 300.);
-        let end_p = glm::Vec2::new(700., 400.);
-        let gap_amount = 30;
+    //     let start_p = glm::Vec2::new(100., 300.);
+    //     let end_p = glm::Vec2::new(700., 400.);
+    //     let gap_amount = 30;
 
-        env_objects.push(Box::new(DottedLine::new(
-            start_p,
-            end_p,
-            gap_amount,
-        )));
+    //     env_objects.push(Box::new(DottedLine::new(
+    //         start_p,
+    //         end_p,
+    //         gap_amount,
+    //     )));
 
-        let start_p = glm::Vec2::new(100., 400.);
-        let end_p = glm::Vec2::new(700., 500.);
-        env_objects.push(Box::new(DottedLine::new(
-            start_p,
-            end_p,
-            gap_amount,
-        )));
+    //     let start_p = glm::Vec2::new(100., 400.);
+    //     let end_p = glm::Vec2::new(700., 500.);
+    //     env_objects.push(Box::new(DottedLine::new(
+    //         start_p,
+    //         end_p,
+    //         gap_amount,
+    //     )));
 
-        let mut lights = vec![
-            Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone(), 300., 3.),
-        ];
+    //     let mut lights = vec![
+    //         Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone(), 300., 3.),
+    //     ];
 
-        let aol_delta = 5;
-        let mut amount_of_lights = 20;
-        let mut last_aol_up = SystemTime::now();
-        let mut last_aol_down = SystemTime::now();
-        let mut last_updated_lights = SystemTime::now();
-        let max_update_aol_millis = 150;
-        let max_update_lights_millis = 1500;
-        generate_random_lights(&mut lights, amount_of_lights);
+    //     let aol_delta = 5;
+    //     let mut amount_of_lights = 20;
+    //     let mut last_aol_up = SystemTime::now();
+    //     let mut last_aol_down = SystemTime::now();
+    //     let mut last_updated_lights = SystemTime::now();
+    //     let max_update_aol_millis = 150;
+    //     let max_update_lights_millis = 1500;
+    //     generate_random_lights(&mut lights, amount_of_lights);
 
-        let event_loop = std::mem::replace(&mut self.event_loop, None);
-        if let Some(el) = event_loop {
-            el.run(move |event, _, control_flow| match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::Resized(_),
-                    ..
-                } => {
-                    recreate_swapchain = true;
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::CursorMoved { position, .. },
-                    ..
-                } => {
-                    mouse_pos = glm::Vec2::new(position.x as f32, position.y as f32);
-                    (&mut lights[0]).set_center(mouse_pos);
-                }
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::R),
-                                    ..
-                                },
-                            ..
-                        },
-                    ..
-                } => {
-                    if last_updated_lights.elapsed().unwrap().as_millis() > max_update_lights_millis {
-                        generate_random_lights(&mut lights, amount_of_lights);
-                        last_updated_lights = SystemTime::now();
-                    }
-                }
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::Up),
-                                    ..
-                                },
-                            ..
-                        },
-                    ..
-                } => {
-                    if last_aol_up.elapsed().unwrap().as_millis() > max_update_aol_millis {
-                        amount_of_lights += aol_delta;
-                        println!("{}", amount_of_lights);
-                        last_aol_up = SystemTime::now();
-                    }
-                }
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::Down),
-                                    ..
-                                },
-                            ..
-                        },
-                    ..
-                } => {
-                    if last_aol_down.elapsed().unwrap().as_millis() > max_update_aol_millis {
-                        amount_of_lights = max(0, amount_of_lights - aol_delta);
-                        println!("{}", amount_of_lights);
-                        last_aol_down = SystemTime::now();
-                    }
-                }
-                Event::RedrawEventsCleared => {
-                    let dimensions = surface.window().inner_size();
-                    if dimensions.width == 0 || dimensions.height == 0 {
-                        return;
-                    }
-                    previous_frame_end.as_mut().unwrap().cleanup_finished();
-                    if recreate_swapchain {
-                        let (new_swapchain, new_images) =
-                            match swapchain.recreate(SwapchainCreateInfo {
-                                image_extent: dimensions.into(),
-                                ..swapchain.create_info()
-                            }) {
-                                Ok(r) => r,
-                                Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => {
-                                    return
-                                }
-                                Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                            };
+    //     let event_loop = std::mem::replace(&mut self.event_loop, None);
+    //     if let Some(el) = event_loop {
+    //         el.run(move |event, _, control_flow| match event {
+    //             Event::WindowEvent {
+    //                 event: WindowEvent::CloseRequested,
+    //                 ..
+    //             } => {
+    //                 *control_flow = ControlFlow::Exit;
+    //             }
+    //             Event::WindowEvent {
+    //                 event: WindowEvent::Resized(_),
+    //                 ..
+    //             } => {
+    //                 recreate_swapchain = true;
+    //             }
+    //             Event::WindowEvent {
+    //                 event: WindowEvent::CursorMoved { position, .. },
+    //                 ..
+    //             } => {
+    //                 mouse_pos = glm::Vec2::new(position.x as f32, position.y as f32);
+    //                 (&mut lights[0]).set_center(mouse_pos);
+    //             }
+    //             Event::WindowEvent {
+    //                 event:
+    //                     WindowEvent::KeyboardInput {
+    //                         input:
+    //                             KeyboardInput {
+    //                                 virtual_keycode: Some(VirtualKeyCode::R),
+    //                                 ..
+    //                             },
+    //                         ..
+    //                     },
+    //                 ..
+    //             } => {
+    //                 if last_updated_lights.elapsed().unwrap().as_millis() > max_update_lights_millis {
+    //                     generate_random_lights(&mut lights, amount_of_lights);
+    //                     last_updated_lights = SystemTime::now();
+    //                 }
+    //             }
+    //             Event::WindowEvent {
+    //                 event:
+    //                     WindowEvent::KeyboardInput {
+    //                         input:
+    //                             KeyboardInput {
+    //                                 virtual_keycode: Some(VirtualKeyCode::Up),
+    //                                 ..
+    //                             },
+    //                         ..
+    //                     },
+    //                 ..
+    //             } => {
+    //                 if last_aol_up.elapsed().unwrap().as_millis() > max_update_aol_millis {
+    //                     amount_of_lights += aol_delta;
+    //                     println!("{}", amount_of_lights);
+    //                     last_aol_up = SystemTime::now();
+    //                 }
+    //             }
+    //             Event::WindowEvent {
+    //                 event:
+    //                     WindowEvent::KeyboardInput {
+    //                         input:
+    //                             KeyboardInput {
+    //                                 virtual_keycode: Some(VirtualKeyCode::Down),
+    //                                 ..
+    //                             },
+    //                         ..
+    //                     },
+    //                 ..
+    //             } => {
+    //                 if last_aol_down.elapsed().unwrap().as_millis() > max_update_aol_millis {
+    //                     amount_of_lights = max(0, amount_of_lights - aol_delta);
+    //                     println!("{}", amount_of_lights);
+    //                     last_aol_down = SystemTime::now();
+    //                 }
+    //             }
+    //             Event::RedrawEventsCleared => {
+    //                 let dimensions = surface.window().inner_size();
+    //                 if dimensions.width == 0 || dimensions.height == 0 {
+    //                     return;
+    //                 }
+    //                 previous_frame_end.as_mut().unwrap().cleanup_finished();
+    //                 if recreate_swapchain {
+    //                     let (new_swapchain, new_images) =
+    //                         match swapchain.recreate(SwapchainCreateInfo {
+    //                             image_extent: dimensions.into(),
+    //                             ..swapchain.create_info()
+    //                         }) {
+    //                             Ok(r) => r,
+    //                             Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => {
+    //                                 return
+    //                             }
+    //                             Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
+    //                         };
 
-                        swapchain = new_swapchain;
-                        (framebuffers, descriptor_sets) = window_size_dependent_setup(
-                            &new_images,
-                            render_pass.clone(),
-                            &pipeline,
-                            &mut viewport,
-                        );
-                        recreate_swapchain = false;
-                    }
-                    let (image_num, suboptimal, acquire_future) =
-                        match acquire_next_image(swapchain.clone(), None) {
-                            Ok(r) => r,
-                            Err(AcquireError::OutOfDate) => {
-                                recreate_swapchain = true;
-                                return;
-                            }
-                            Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                        };
+    //                     swapchain = new_swapchain;
+    //                     (framebuffers, descriptor_sets) = window_size_dependent_setup(
+    //                         &new_images,
+    //                         render_pass.clone(),
+    //                         &pipeline,
+    //                         &mut viewport,
+    //                     );
+    //                     recreate_swapchain = false;
+    //                 }
+    //                 let (image_num, suboptimal, acquire_future) =
+    //                     match acquire_next_image(swapchain.clone(), None) {
+    //                         Ok(r) => r,
+    //                         Err(AcquireError::OutOfDate) => {
+    //                             recreate_swapchain = true;
+    //                             return;
+    //                         }
+    //                         Err(e) => panic!("Failed to acquire next image: {:?}", e),
+    //                     };
 
-                    if suboptimal {
-                        recreate_swapchain = true;
-                    }
+    //                 if suboptimal {
+    //                     recreate_swapchain = true;
+    //                 }
 
-                    let mut builder = AutoCommandBufferBuilder::primary(
-                        device.clone(),
-                        queue.family(),
-                        CommandBufferUsage::OneTimeSubmit,
-                    )
-                    .unwrap();
+    //                 let mut builder = AutoCommandBufferBuilder::primary(
+    //                     device.clone(),
+    //                     queue.family(),
+    //                     CommandBufferUsage::OneTimeSubmit,
+    //                 )
+    //                 .unwrap();
 
-                    let fb_image = framebuffers[image_num].attachments()[0].image();
-                    let dim = surface.window().inner_size();
-                    let res = [dim.width as f32, dim.height as f32];
+    //                 let fb_image = framebuffers[image_num].attachments()[0].image();
+    //                 let dim = surface.window().inner_size();
+    //                 let res = [dim.width as f32, dim.height as f32];
 
-                    builder
-                        .clear_color_image(ClearColorImageInfo::image(fb_image).clone())
-                        .unwrap();
+    //                 builder
+    //                     .clear_color_image(ClearColorImageInfo::image(fb_image).clone())
+    //                     .unwrap();
 
-                    for light in lights.iter_mut() {
-                        let (vertices, indices) = create_vertices(&env_objects, light);
+    //                 for light in lights.iter_mut() {
+    //                     let (vertices, indices) = create_vertices(&env_objects, light);
 
-                        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-                            device.clone(),
-                            BufferUsage::all(),
-                            false,
-                            vertices,
-                        )
-                        .unwrap();
+    //                     let vertex_buffer = CpuAccessibleBuffer::from_iter(
+    //                         device.clone(),
+    //                         BufferUsage::all(),
+    //                         false,
+    //                         vertices,
+    //                     )
+    //                     .unwrap();
 
-                        let index_buffer = CpuAccessibleBuffer::from_iter(
-                            device.clone(),
-                            BufferUsage::all(),
-                            false,
-                            indices,
-                        )
-                        .unwrap();
+    //                     let index_buffer = CpuAccessibleBuffer::from_iter(
+    //                         device.clone(),
+    //                         BufferUsage::all(),
+    //                         false,
+    //                         indices,
+    //                     )
+    //                     .unwrap();
 
-                        let push_constants = PushConstants {
-                            mouse_pos: mouse_pos.into(),
-                            resolution: res,
-                            dimensions: [dimensions.width as f32, dimensions.height as f32],
-                            light_center: light.get_center().clone(),
-                            light_color: light.color.clone(),
-                            light_brightness: light.brightness,
-                            light_radius: light.get_radius(),
-                            time_passed,
-                        };
+    //                     let push_constants = PushConstants {
+    //                         mouse_pos: mouse_pos.into(),
+    //                         resolution: res,
+    //                         dimensions: [dimensions.width as f32, dimensions.height as f32],
+    //                         light_center: light.get_center().clone(),
+    //                         light_color: light.color.clone(),
+    //                         light_brightness: light.brightness,
+    //                         light_radius: light.get_radius(),
+    //                         time_passed,
+    //                     };
 
-                        builder
-                            .begin_render_pass(
-                                RenderPassBeginInfo {
-                                    clear_values: vec![None],
-                                    ..RenderPassBeginInfo::framebuffer(
-                                        framebuffers[image_num].clone(),
-                                    )
-                                },
-                                SubpassContents::Inline,
-                            )
-                            .unwrap()
-                            .set_viewport(0, [viewport.clone()])
-                            .bind_pipeline_graphics(pipeline.clone())
-                            .push_constants(pipeline.layout().clone(), 0, push_constants)
-                            .bind_descriptor_sets(
-                                PipelineBindPoint::Graphics,
-                                pipeline.layout().clone(),
-                                0,
-                                descriptor_sets[image_num].clone(),
-                            )
-                            .bind_vertex_buffers(0, vertex_buffer.clone())
-                            .bind_index_buffer(index_buffer.clone())
-                            .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
-                            .unwrap()
-                            .end_render_pass()
-                            .unwrap();
-                    }
+    //                     builder
+    //                         .begin_render_pass(
+    //                             RenderPassBeginInfo {
+    //                                 clear_values: vec![None],
+    //                                 ..RenderPassBeginInfo::framebuffer(
+    //                                     framebuffers[image_num].clone(),
+    //                                 )
+    //                             },
+    //                             SubpassContents::Inline,
+    //                         )
+    //                         .unwrap()
+    //                         .set_viewport(0, [viewport.clone()])
+    //                         .bind_pipeline_graphics(pipeline.clone())
+    //                         .push_constants(pipeline.layout().clone(), 0, push_constants)
+    //                         .bind_descriptor_sets(
+    //                             PipelineBindPoint::Graphics,
+    //                             pipeline.layout().clone(),
+    //                             0,
+    //                             descriptor_sets[image_num].clone(),
+    //                         )
+    //                         .bind_vertex_buffers(0, vertex_buffer.clone())
+    //                         .bind_index_buffer(index_buffer.clone())
+    //                         .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
+    //                         .unwrap()
+    //                         .end_render_pass()
+    //                         .unwrap();
+    //                 }
 
-                    time_passed += 0.01;
+    //                 time_passed += 0.01;
 
-                    let command_buffer = builder.build().unwrap();
+    //                 let command_buffer = builder.build().unwrap();
 
-                    let future = previous_frame_end
-                        .take()
-                        .unwrap()
-                        .join(acquire_future)
-                        .then_execute(queue.clone(), command_buffer)
-                        .unwrap()
-                        .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
-                        .then_signal_fence_and_flush();
+    //                 let future = previous_frame_end
+    //                     .take()
+    //                     .unwrap()
+    //                     .join(acquire_future)
+    //                     .then_execute(queue.clone(), command_buffer)
+    //                     .unwrap()
+    //                     .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
+    //                     .then_signal_fence_and_flush();
 
-                    match future {
-                        Ok(future) => {
-                            previous_frame_end = Some(future.boxed());
-                        }
-                        Err(FlushError::OutOfDate) => {
-                            recreate_swapchain = true;
-                            previous_frame_end = Some(sync::now(device.clone()).boxed());
-                        }
-                        Err(e) => {
-                            println!("Failed to flush future: {:?}", e);
-                            previous_frame_end = Some(sync::now(device.clone()).boxed());
-                        }
-                    }
-                }
-                _ => (),
-            });
-        }
-    }
+    //                 match future {
+    //                     Ok(future) => {
+    //                         previous_frame_end = Some(future.boxed());
+    //                     }
+    //                     Err(FlushError::OutOfDate) => {
+    //                         recreate_swapchain = true;
+    //                         previous_frame_end = Some(sync::now(device.clone()).boxed());
+    //                     }
+    //                     Err(e) => {
+    //                         println!("Failed to flush future: {:?}", e);
+    //                         previous_frame_end = Some(sync::now(device.clone()).boxed());
+    //                     }
+    //                 }
+    //             }
+    //             _ => (),
+    //         });
+    //     }
+    // }
 }
 
 // TODO: Draw a concave polygon more efficiently
@@ -614,7 +961,7 @@ fn generate_random_lights(lights: &mut Vec<Light>, amount_of_lights: usize) {
         glm::Vec2::new(351., 551.),
         glm::Vec2::new(701., 551.),
     ];
-    
+
     let mut rng = rand::thread_rng();
     for i in 0..amount_of_lights {
         let color_offset = glm::Vec3::new(
@@ -622,16 +969,35 @@ fn generate_random_lights(lights: &mut Vec<Light>, amount_of_lights: usize) {
             rng.gen_range(0.0..0.2) - 0.1,
             rng.gen_range(0.0..0.2) - 0.1,
         );
-        lights.push(
-            Light::new(
-                colors[i % colors.len()] + color_offset,
-                glm::Vec2::new(rng.gen_range(31.0..771.0), rng.gen_range(31.0..571.0)),
-                rng.gen_range(100.0..200.0),
-                // 100.0,
-                rng.gen_range(0.2..0.8)
-            )
-        );
+        lights.push(Light::new(
+            colors[i % colors.len()] + color_offset,
+            glm::Vec2::new(rng.gen_range(31.0..771.0), rng.gen_range(31.0..571.0)),
+            rng.gen_range(100.0..200.0),
+            // 100.0,
+            rng.gen_range(0.2..0.8),
+        ));
     }
+}
+
+fn get_swapchain_descriptor_sets(
+    images: &[Arc<SwapchainImage<Window>>],
+    pipeline: &Arc<GraphicsPipeline>,
+) -> Arc<Vec<Arc<PersistentDescriptorSet>>> {
+    Arc::new(
+        images
+            .iter()
+            .map(|image| {
+                PersistentDescriptorSet::new(
+                    pipeline.layout().set_layouts()[0].clone(),
+                    [WriteDescriptorSet::image_view(
+                        0,
+                        ImageView::new_default(image.clone()).unwrap(),
+                    )],
+                )
+                .unwrap()
+            })
+            .collect(),
+    )
 }
 
 fn window_size_dependent_setup(
