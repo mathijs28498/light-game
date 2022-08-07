@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use rand::Rng;
+use rand::{Rng, seq::index};
 use std::{
     alloc::System,
     cmp::max,
@@ -7,7 +7,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess, BufferContents},
+    buffer::{BufferContents, BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
     command_buffer::{
         AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage,
         PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents,
@@ -26,7 +26,7 @@ use vulkano::{
     pipeline::{
         graphics::{
             input_assembly::InputAssemblyState,
-            vertex_input::BuffersDefinition,
+            vertex_input::{BuffersDefinition, Vertex},
             viewport::{Viewport, ViewportState},
         },
         GraphicsPipeline, Pipeline, PipelineBindPoint,
@@ -48,6 +48,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
+use bevy::prelude::*;
 
 use crate::game_object::{
     game_object::{DottedLine, EnvironmentObject, Light, Line, AABB},
@@ -58,17 +59,17 @@ use nalgebra_glm as glm;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 pub struct VertexTest {
-    position: [f32; 2],
-    color: [f32; 3],
+    pub position: [f32; 2],
+    pub color: [f32; 3],
 }
 impl_vertex!(VertexTest, position, color);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct Vertex {
-    position: [f32; 2],
+pub struct MyVertex {
+    pub position: [f32; 2],
 }
-impl_vertex!(Vertex, position);
+impl_vertex!(MyVertex, position);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -85,14 +86,26 @@ struct PushConstants {
 
 // Create generic for VertexTest
 // Add vertices to constructor
-pub struct RenderObject<T> where T: Zeroable + Pod, [T]: BufferContents {
+#[derive(Component)]
+pub struct RenderObject<T>
+where
+    T: Zeroable + Pod,
+    [T]: BufferContents,
+{
     vertex_buffer: Arc<CpuAccessibleBuffer<[T]>>,
     index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
 }
 
-impl<T> RenderObject<T> where T: Zeroable + Pod, [T]: BufferContents {
-    pub fn new(queue: &Arc<Queue>, vertices: Vec<T>, index_buffer: Arc<CpuAccessibleBuffer<[u32]>>) -> Self {
-        // let indices = vec![0, 1, 2];
+impl<T> RenderObject<T>
+where
+    T: Zeroable + Pod,
+    [T]: BufferContents,
+{
+    pub fn new(
+        queue: &Arc<Queue>,
+        vertices: Vec<T>,
+    ) -> Self {
+        let index_buffer = calculate_index_buffer_polygon(queue, vertices.len());
 
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             queue.device().clone(),
@@ -107,6 +120,17 @@ impl<T> RenderObject<T> where T: Zeroable + Pod, [T]: BufferContents {
             index_buffer,
         }
     }
+}
+
+pub fn calculate_index_buffer_polygon(queue: &Arc<Queue>, amount_of_vertices: usize) -> Arc<CpuAccessibleBuffer<[u32]>> {
+    let indices = calculate_indices_polygon(amount_of_vertices - 1);
+    CpuAccessibleBuffer::from_iter(
+        queue.device().clone(),
+        BufferUsage::index_buffer(),
+        false,
+        indices,
+    )
+    .unwrap()
 }
 
 pub struct RenderPassExecutor {
@@ -167,11 +191,14 @@ impl RenderPassExecutor {
     }
 
     // TODO: Make VertexTest a generic
-    pub fn do_pass(
+    pub fn do_pass<T>(
         &mut self,
-        vertex_buffer: Arc<CpuAccessibleBuffer<[VertexTest]>>,
+        vertex_buffer: Arc<CpuAccessibleBuffer<[T]>>,
         index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
-    ) {
+    ) where
+        T: Zeroable + Pod,
+        [T]: BufferContents,
+    {
         let index_length = index_buffer.len();
         let builder = self.command_buffer_builder.as_mut().unwrap();
 
@@ -210,7 +237,10 @@ impl RenderPassExecutor {
         F: GpuFuture + 'static,
     {
         before_future
-            .then_execute(queue, self.command_buffer_builder.take().unwrap().build().unwrap())
+            .then_execute(
+                queue,
+                self.command_buffer_builder.take().unwrap().build().unwrap(),
+            )
             .unwrap()
             .boxed()
     }
@@ -234,7 +264,10 @@ pub struct VulkanoDevice {
 }
 
 impl VulkanoDevice {
-    pub fn new(queue: Arc<Queue>, final_output_format: Format) -> Self {
+    pub fn new<T>(queue: Arc<Queue>, final_output_format: Format) -> Self
+    where
+        T: Vertex,
+    {
         let render_pass = RenderPass::new(
             queue.device().clone(),
             RenderPassCreateInfo {
@@ -298,7 +331,7 @@ impl VulkanoDevice {
 
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .vertex_input_state(BuffersDefinition::new().vertex::<VertexTest>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<T>())
             .input_assembly_state(InputAssemblyState::new())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
@@ -318,6 +351,7 @@ impl VulkanoDevice {
         &mut self,
         before_future: F,
         final_image: Arc<dyn ImageViewAbstract + 'static>,
+        render_object_query: Query<&RenderObject<MyVertex>, With<RenderObject<MyVertex>>>,
     ) -> Box<dyn GpuFuture>
     where
         F: GpuFuture + 'static,
@@ -338,34 +372,11 @@ impl VulkanoDevice {
             self.render_pass.clone(),
             final_image.clone(),
         );
-        
-        let vertices = vec![
-            VertexTest {
-                position: [-0.25, -0.5],
-                color: [0.3, 0.9, 0.7],
-            },
-            VertexTest {
-                position: [0.5, 0.0],
-                color: [0.7, 0.1, 0.3],
-            },
-            VertexTest {
-                position: [-0.1, 0.25],
-                color: [0.7, 0.1, 0.3],
-            },
-        ];
-
-        let index_buffer = CpuAccessibleBuffer::from_iter(
-            self.queue.device().clone(),
-            BufferUsage::index_buffer(),
-            false,
-            vec![0, 1, 2],
-        )
-        .unwrap();
-
-        let render_object = RenderObject::new(&self.queue, vertices, index_buffer);
 
         executor.clear_framebuffer_image();
-        executor.do_pass(render_object.vertex_buffer, render_object.index_buffer);
+        for render_object in &render_object_query {
+            executor.do_pass(render_object.vertex_buffer.clone(), render_object.index_buffer.clone());
+        }
         executor.execute(self.queue.clone(), before_future)
     }
 
@@ -527,7 +538,7 @@ impl VulkanoDevice {
 
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<MyVertex>())
             .input_assembly_state(InputAssemblyState::new())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
@@ -852,18 +863,18 @@ impl VulkanoDevice {
 fn create_vertices(
     env_objects: &Vec<Box<dyn EnvironmentObject>>,
     light: &mut Light,
-) -> (Vec<Vertex>, Vec<u32>) {
+) -> (Vec<MyVertex>, Vec<u32>) {
     let light_polygon = light.calculate_light_polygon(env_objects);
-    let light_vertices = light_polygon.iter().map(|p| Vertex {
+    let light_vertices = light_polygon.iter().map(|p| MyVertex {
         position: [p.x, p.y],
     });
 
-    let mut vertices = vec![Vertex {
+    let mut vertices = vec![MyVertex {
         position: [light.get_center().x, light.get_center().y],
     }];
     vertices.extend(light_vertices);
     while vertices.len() < 3 {
-        vertices.push(Vertex { position: [0., 0.] });
+        vertices.push(MyVertex { position: [0., 0.] });
     }
 
     let indices = calculate_indices_polygon(vertices.len() - 1);

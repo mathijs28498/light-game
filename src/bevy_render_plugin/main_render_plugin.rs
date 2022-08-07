@@ -1,12 +1,13 @@
 use bevy::{
     diagnostic::{Diagnostics, FrameTimeDiagnosticsPlugin},
     prelude::*,
-    window::WindowId, render::view::window,
+    render::view::window,
+    window::WindowId,
 };
 use bevy_vulkano::{BevyVulkanoWindows, PipelineSyncData};
 use vulkano::{image::ImageAccess, sync::GpuFuture};
 
-use crate::vulkano_backend::vulkano_device::VulkanoDevice;
+use crate::vulkano_backend::vulkano_device::{MyVertex, RenderObject, VertexTest, VulkanoDevice};
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 pub enum RenderStage {
@@ -21,8 +22,7 @@ pub struct MainRenderPlugin;
 
 impl Plugin for MainRenderPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_startup_system(insert_render_pass_system)
+        app.add_startup_system(insert_render_pass_system)
             .add_stage_after(
                 CoreStage::PostUpdate,
                 RenderStage::GuiInit,
@@ -69,7 +69,48 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
     let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
     let queue = window_renderer.graphics_queue();
     let format = window_renderer.swapchain_format();
-    let vulkano_device = VulkanoDevice::new(queue, format);
+
+    let vertices = vec![
+        MyVertex {
+            position: [-0.0, -0.0],
+        },
+        MyVertex {
+            position: [-0.5, -0.5],
+        },
+        MyVertex {
+            position: [0.5, -0.5],
+        },
+        MyVertex {
+            position: [0.5, 0.5],
+        },
+        MyVertex {
+            position: [-0.5, 0.5],
+        },
+    ];
+    let render_object = RenderObject::new(&queue, vertices);
+    commands.spawn().insert(render_object);
+
+    let vertices = vec![
+        MyVertex {
+            position: [-0.0, -0.0],
+        },
+        MyVertex {
+            position: [-0.75, -0.75],
+        },
+        MyVertex {
+            position: [0.8, -0.2],
+        },
+        MyVertex {
+            position: [0.1, 0.3],
+        },
+        MyVertex {
+            position: [-0.2, 0.7],
+        },
+    ];
+    let render_object = RenderObject::new(&queue, vertices);
+    commands.spawn().insert(render_object);
+
+    let vulkano_device = VulkanoDevice::new::<MyVertex>(queue, format);
     commands.insert_resource(vulkano_device);
 }
 
@@ -119,10 +160,11 @@ pub fn main_render_system(
     diagnostics: Res<Diagnostics>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut vulkano_device: ResMut<VulkanoDevice>,
+    render_object_query: Query<&RenderObject<MyVertex>, With<RenderObject<MyVertex>>>,
 ) {
     if let Some(diag) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
         if let Some(avg) = diag.average() {
-            println!(" FPS: {:.2}", avg);
+            println!("{:.2} fps ({:.2} ms/frame)", avg, 1. / avg * 1000.);
         }
     }
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
@@ -136,12 +178,13 @@ pub fn main_render_system(
     // We take the before pipeline future leaving None in its place
     if let Some(before_future) = frame_data.before.take() {
         let final_image_view = window_renderer.swapchain_image_view();
-        let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(before_future, window_renderer.swapchain_image_view());
+        let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
+            before_future,
+            window_renderer.swapchain_image_view(),
+            render_object_query,
+        );
 
-        let after_drawing = after_future
-            .then_signal_fence_and_flush()
-            .unwrap()
-            .boxed();
+        let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();
         // Update after pipeline future (so post render will know to present frame)
         frame_data.after = Some(after_drawing);
     }
