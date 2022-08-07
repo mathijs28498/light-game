@@ -7,10 +7,10 @@ use std::{
     time::{Duration, SystemTime},
 };
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
+    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess, BufferContents},
     command_buffer::{
-        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage, RenderPassBeginInfo,
-        SubpassContents, PrimaryAutoCommandBuffer
+        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage,
+        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents,
     },
     descriptor_set::{DescriptorSet, PersistentDescriptorSet, WriteDescriptorSet},
     device::{
@@ -57,7 +57,7 @@ use nalgebra_glm as glm;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-struct VertexTest {
+pub struct VertexTest {
     position: [f32; 2],
     color: [f32; 3],
 }
@@ -65,7 +65,7 @@ impl_vertex!(VertexTest, position, color);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-struct Vertex {
+pub struct Vertex {
     position: [f32; 2],
 }
 impl_vertex!(Vertex, position);
@@ -83,29 +83,16 @@ struct PushConstants {
     time_passed: f32,
 }
 
-pub struct Triangle {
-    vertex_buffer: Arc<CpuAccessibleBuffer<[VertexTest]>>,
+// Create generic for VertexTest
+// Add vertices to constructor
+pub struct RenderObject<T> where T: Zeroable + Pod, [T]: BufferContents {
+    vertex_buffer: Arc<CpuAccessibleBuffer<[T]>>,
     index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
 }
 
-impl Triangle {
-    pub fn new(queue: &Arc<Queue>) -> Self {
-        let vertices = vec![
-            VertexTest {
-                position: [-0.25, -0.5],
-                color: [0.3, 0.9, 0.7],
-            },
-            VertexTest {
-                position: [0.5, 0.0],
-                color: [0.7, 0.1, 0.3],
-            },
-            VertexTest {
-                position: [-0.1, 0.25],
-                color: [0.7, 0.1, 0.3],
-            },
-        ];
-
-        let indices = vec![0, 1, 2];
+impl<T> RenderObject<T> where T: Zeroable + Pod, [T]: BufferContents {
+    pub fn new(queue: &Arc<Queue>, vertices: Vec<T>, index_buffer: Arc<CpuAccessibleBuffer<[u32]>>) -> Self {
+        // let indices = vec![0, 1, 2];
 
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
             queue.device().clone(),
@@ -115,51 +102,117 @@ impl Triangle {
         )
         .unwrap();
 
-        let index_buffer = CpuAccessibleBuffer::from_iter(
-            queue.device().clone(),
-            BufferUsage::index_buffer(),
-            false,
-            indices,
-        )
-        .unwrap();
-
         Self {
             vertex_buffer,
             index_buffer,
         }
     }
+}
 
-    pub fn draw(
-        &self,
-        builder: &mut AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>,
-        framebuffer: Arc<Framebuffer>,
-        descriptor_set: Arc<PersistentDescriptorSet>,
+pub struct RenderPassExecutor {
+    pipeline: Arc<GraphicsPipeline>,
+    descriptor_set: Option<Arc<PersistentDescriptorSet>>,
+    framebuffer: Arc<Framebuffer>,
+    command_buffer_builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
+    viewport: Viewport,
+}
+
+impl RenderPassExecutor {
+    pub fn new(
         pipeline: Arc<GraphicsPipeline>,
-        viewport: Viewport,
+        descriptor_set: Option<Arc<PersistentDescriptorSet>>,
+        queue: Arc<Queue>,
+        render_pass: Arc<RenderPass>,
+        image: Arc<dyn ImageViewAbstract + 'static>,
+    ) -> Self {
+        let dims = image.image().dimensions().width_height();
+        let framebuffer = Framebuffer::new(
+            render_pass,
+            FramebufferCreateInfo {
+                attachments: vec![image],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let builder = AutoCommandBufferBuilder::primary(
+            queue.device().clone(),
+            queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [dims[0] as f32, dims[1] as f32],
+            depth_range: 0.0..1.0,
+        };
+
+        Self {
+            pipeline,
+            descriptor_set,
+            framebuffer,
+            command_buffer_builder: Some(builder),
+            viewport,
+        }
+    }
+
+    pub fn clear_framebuffer_image(&mut self) {
+        let fb_image = self.framebuffer.attachments()[0].image();
+        self.command_buffer_builder
+            .as_mut()
+            .unwrap()
+            .clear_color_image(ClearColorImageInfo::image(fb_image))
+            .unwrap();
+    }
+
+    // TODO: Make VertexTest a generic
+    pub fn do_pass(
+        &mut self,
+        vertex_buffer: Arc<CpuAccessibleBuffer<[VertexTest]>>,
+        index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
     ) {
+        let index_length = index_buffer.len();
+        let builder = self.command_buffer_builder.as_mut().unwrap();
+
         builder
             .begin_render_pass(
                 RenderPassBeginInfo {
                     clear_values: vec![None],
-                    ..RenderPassBeginInfo::framebuffer(framebuffer)
+                    ..RenderPassBeginInfo::framebuffer(self.framebuffer.clone())
                 },
                 SubpassContents::Inline,
             )
             .unwrap()
-            .set_viewport(0, [viewport])
-            .bind_pipeline_graphics(pipeline.clone())
-            .bind_vertex_buffers(0, self.vertex_buffer.clone())
-            .bind_index_buffer(self.index_buffer.clone())
-            .bind_descriptor_sets(
+            .set_viewport(0, [self.viewport.clone()])
+            .bind_pipeline_graphics(self.pipeline.clone())
+            .bind_vertex_buffers(0, vertex_buffer)
+            .bind_index_buffer(index_buffer);
+
+        if let Some(descriptor_set) = &self.descriptor_set {
+            builder.bind_descriptor_sets(
                 PipelineBindPoint::Graphics,
-                pipeline.layout().clone(),
+                self.pipeline.layout().clone(),
                 0,
-                descriptor_set,
-            )
-            .draw_indexed(self.vertex_buffer.len() as u32, 1, 0, 0, 0)
+                descriptor_set.clone(),
+            );
+        }
+
+        builder
+            .draw_indexed(index_length as u32, 1, 0, 0, 0)
             .unwrap()
             .end_render_pass()
             .unwrap();
+    }
+
+    fn execute<F>(&mut self, queue: Arc<Queue>, before_future: F) -> Box<dyn GpuFuture>
+    where
+        F: GpuFuture + 'static,
+    {
+        before_future
+            .then_execute(queue, self.command_buffer_builder.take().unwrap().build().unwrap())
+            .unwrap()
+            .boxed()
     }
 }
 
@@ -167,7 +220,6 @@ pub struct VulkanoDevice {
     queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
-    // command_buffer_builder: Arc<Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>>,
     descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
     // descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
     // event_loop: Option<EventLoop<()>>,
@@ -254,17 +306,15 @@ impl VulkanoDevice {
             .build(queue.device().clone())
             .unwrap();
 
-
         Self {
             queue,
             render_pass,
             pipeline,
-            // command_buffer_builder: Arc::new(None),
             descriptor_sets: Vec::new(),
         }
     }
 
-    pub fn pass<F>(
+    pub fn do_pass<F>(
         &mut self,
         before_future: F,
         final_image: Arc<dyn ImageViewAbstract + 'static>,
@@ -272,30 +322,6 @@ impl VulkanoDevice {
     where
         F: GpuFuture + 'static,
     {
-        let dims = final_image.image().dimensions().width_height();
-        let framebuffer = Framebuffer::new(
-            self.render_pass.clone(),
-            FramebufferCreateInfo {
-                attachments: vec![final_image.clone()],
-                ..Default::default()
-            },
-        )
-        .unwrap();
-
-        let mut builder = AutoCommandBufferBuilder::primary(
-            self.queue.device().clone(),
-            self.queue.family(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
-
-        let viewport = Viewport {
-            origin: [0.0, 0.0],
-            dimensions: [dims[0] as f32, dims[1] as f32],
-            depth_range: 0.0..1.0,
-        };
-
-        let fb_image = framebuffer.attachments()[0].image();
         let descriptor_set = PersistentDescriptorSet::new(
             self.pipeline.layout().set_layouts()[0].clone(),
             [WriteDescriptorSet::image_view(
@@ -305,69 +331,14 @@ impl VulkanoDevice {
         )
         .unwrap();
 
-        builder
-            .clear_color_image(ClearColorImageInfo::image(fb_image).clone())
-            .unwrap();
-
-        // let vertices = vec![
-        //     VertexTest {
-        //         position: [-0.5, -0.25],
-        //         color: [0.7, 0.1, 0.3],
-        //     },
-        //     VertexTest {
-        //         position: [0.0, 0.5],
-        //         color: [0.7, 0.1, 0.3],
-        //     },
-        //     VertexTest {
-        //         position: [0.25, -0.1],
-        //         color: [0.3, 0.9, 0.7],
-        //     },
-        // ];
-
-        // let indices = vec![0_u32, 1_u32, 2_u32];
-
-        // let vertex_buffer = CpuAccessibleBuffer::from_iter(
-        //     self.queue.device().clone(),
-        //     BufferUsage::vertex_buffer(),
-        //     false,
-        //     vertices,
-        // )
-        // .unwrap();
-
-        // let index_buffer = CpuAccessibleBuffer::from_iter(
-        //     self.queue.device().clone(),
-        //     BufferUsage::index_buffer(),
-        //     false,
-        //     indices,
-        // )
-        // .unwrap();
-
-        // let mut index_len = index_buffer.len();
-
-        // builder
-        //     .begin_render_pass(
-        //         RenderPassBeginInfo {
-        //             clear_values: vec![None],
-        //             ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
-        //         },
-        //         SubpassContents::Inline,
-        //     )
-        //     .unwrap()
-        //     .set_viewport(0, [viewport.clone()])
-        //     .bind_pipeline_graphics(self.pipeline.clone())
-        //     .bind_vertex_buffers(0, vertex_buffer)
-        //     .bind_index_buffer(index_buffer)
-        //     .bind_descriptor_sets(
-        //         PipelineBindPoint::Graphics,
-        //         self.pipeline.layout().clone(),
-        //         0,
-        //         descriptor_set.clone(),
-        //     )
-        //     .draw_indexed(index_len as u32, 1, 0, 0, 0)
-        //     .unwrap()
-        //     .end_render_pass()
-        //     .unwrap();
-
+        let mut executor = RenderPassExecutor::new(
+            self.pipeline.clone(),
+            Some(descriptor_set.clone()),
+            self.queue.clone(),
+            self.render_pass.clone(),
+            final_image.clone(),
+        );
+        
         let vertices = vec![
             VertexTest {
                 position: [-0.25, -0.5],
@@ -383,56 +354,19 @@ impl VulkanoDevice {
             },
         ];
 
-        let indices = vec![0_u32, 1_u32, 2_u32];
-
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            self.queue.device().clone(),
-            BufferUsage::vertex_buffer(),
-            false,
-            vertices,
-        )
-        .unwrap();
-
         let index_buffer = CpuAccessibleBuffer::from_iter(
             self.queue.device().clone(),
             BufferUsage::index_buffer(),
             false,
-            indices,
+            vec![0, 1, 2],
         )
         .unwrap();
 
-        let index_len = index_buffer.len();
+        let render_object = RenderObject::new(&self.queue, vertices, index_buffer);
 
-        builder
-            .begin_render_pass(
-                RenderPassBeginInfo {
-                    clear_values: vec![None],
-                    ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
-                },
-                SubpassContents::Inline,
-            )
-            .unwrap()
-            .set_viewport(0, [viewport.clone()])
-            .bind_pipeline_graphics(self.pipeline.clone())
-            .bind_vertex_buffers(0, vertex_buffer)
-            .bind_index_buffer(index_buffer)
-            .bind_descriptor_sets(
-                PipelineBindPoint::Graphics,
-                self.pipeline.layout().clone(),
-                0,
-                descriptor_set,
-            )
-            .draw_indexed(index_len as u32, 1, 0, 0, 0)
-            .unwrap()
-            .end_render_pass()
-            .unwrap();
-
-        let cb = builder.build().unwrap();
-
-        before_future
-            .then_execute(self.queue.clone(), cb)
-            .unwrap()
-            .boxed()
+        executor.clear_framebuffer_image();
+        executor.do_pass(render_object.vertex_buffer, render_object.index_buffer);
+        executor.execute(self.queue.clone(), before_future)
     }
 
     pub fn old_new_with_initialization() {

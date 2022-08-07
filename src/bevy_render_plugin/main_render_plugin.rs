@@ -12,10 +12,8 @@ use crate::vulkano_backend::vulkano_device::VulkanoDevice;
 pub enum RenderStage {
     GuiInit,
     GuiDefine,
-    PreRender,
     RenderStart,
-    RenderLights,
-    RenderObjects,
+    Render,
     RenderFinish,
 }
 
@@ -37,36 +35,26 @@ impl Plugin for MainRenderPlugin {
             )
             .add_stage_after(
                 RenderStage::GuiDefine,
-                RenderStage::PreRender,
-                SystemStage::single_threaded(),
-            )
-            .add_stage_after(
-                RenderStage::PreRender,
                 RenderStage::RenderStart,
                 SystemStage::single_threaded(),
             )
             .add_stage_after(
                 RenderStage::RenderStart,
-                RenderStage::RenderLights,
+                RenderStage::Render,
                 SystemStage::single_threaded(),
             )
             .add_stage_after(
-                RenderStage::RenderStart,
-                RenderStage::RenderObjects,
-                SystemStage::single_threaded(),
-            )
-            .add_stage_after(
-                RenderStage::RenderObjects,
+                RenderStage::Render,
                 RenderStage::RenderFinish,
                 SystemStage::single_threaded(),
             )
             // Render systems
             .add_system_set_to_stage(
-                RenderStage::PreRender,
+                RenderStage::RenderStart,
                 SystemSet::new().with_system(pre_render_setup_system),
             )
             .add_system_set_to_stage(
-                RenderStage::RenderStart,
+                RenderStage::Render,
                 SystemSet::new().with_system(main_render_system),
             )
             .add_system_set_to_stage(
@@ -148,7 +136,7 @@ pub fn main_render_system(
     // We take the before pipeline future leaving None in its place
     if let Some(before_future) = frame_data.before.take() {
         let final_image_view = window_renderer.swapchain_image_view();
-        let mut after_future: Box<dyn GpuFuture> = vulkano_device.pass(before_future, window_renderer.swapchain_image_view());
+        let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(before_future, window_renderer.swapchain_image_view());
 
         let after_drawing = after_future
             .then_signal_fence_and_flush()
