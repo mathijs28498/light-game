@@ -1,5 +1,6 @@
+use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
-use rand::{Rng, seq::index};
+use rand::{seq::index, Rng};
 use std::{
     alloc::System,
     cmp::max,
@@ -48,11 +49,13 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Window, WindowBuilder},
 };
-use bevy::prelude::*;
 
-use crate::game_object::{
-    game_object::{DottedLine, EnvironmentObject, Light, Line, AABB},
-    help_functions::{calculate_indices_polygon, get_all_points},
+use crate::{
+    game_object::{
+        game_object::{DottedLine, EnvironmentObject, Light, Line, AABB},
+        help_functions::{calculate_indices_polygon, get_all_points},
+    },
+    MousePosition,
 };
 use nalgebra_glm as glm;
 
@@ -66,22 +69,21 @@ impl_vertex!(VertexTest, position, color);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct MyVertex {
+pub struct SimpleVertex {
     pub position: [f32; 2],
 }
-impl_vertex!(MyVertex, position);
+impl_vertex!(SimpleVertex, position);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-struct PushConstants {
+pub struct PushConstants {
     mouse_pos: glm::Vec2,
     resolution: [f32; 2],
-    dimensions: [f32; 2],
+    time_passed: f32,
+    light_radius: f32,
     light_center: glm::Vec2,
     light_color: glm::Vec3,
     light_brightness: f32,
-    light_radius: f32,
-    time_passed: f32,
 }
 
 // Create generic for VertexTest
@@ -92,8 +94,9 @@ where
     T: Zeroable + Pod,
     [T]: BufferContents,
 {
-    vertex_buffer: Arc<CpuAccessibleBuffer<[T]>>,
-    index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
+    vertex_buffer: Option<Arc<CpuAccessibleBuffer<[T]>>>,
+    index_buffer: Option<Arc<CpuAccessibleBuffer<[u32]>>>,
+    queue: Arc<Queue>,
 }
 
 impl<T> RenderObject<T>
@@ -101,28 +104,44 @@ where
     T: Zeroable + Pod,
     [T]: BufferContents,
 {
-    pub fn new(
-        queue: &Arc<Queue>,
-        vertices: Vec<T>,
-    ) -> Self {
-        let index_buffer = calculate_index_buffer_polygon(queue, vertices.len());
+    pub fn new(queue: Arc<Queue>) -> Self {
+        // let index_buffer = calculate_index_buffer_polygon(&queue, vertices.len());
+
+        // let vertex_buffer = CpuAccessibleBuffer::from_iter(
+        //     queue.device().clone(),
+        //     BufferUsage::vertex_buffer(),
+        //     false,
+        //     vertices,
+        // )
+        // .unwrap();
+
+        Self {
+            vertex_buffer: None,
+            index_buffer: None,
+            queue,
+        }
+    }
+
+    pub fn update_vertex_buffer(&mut self, vertices: Vec<T>) {
+        let index_buffer = calculate_index_buffer_polygon(&self.queue, vertices.len());
 
         let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            queue.device().clone(),
+            self.queue.device().clone(),
             BufferUsage::vertex_buffer(),
             false,
             vertices,
         )
         .unwrap();
 
-        Self {
-            vertex_buffer,
-            index_buffer,
-        }
+        self.vertex_buffer = Some(vertex_buffer);
+        self.index_buffer = Some(index_buffer);
     }
 }
 
-pub fn calculate_index_buffer_polygon(queue: &Arc<Queue>, amount_of_vertices: usize) -> Arc<CpuAccessibleBuffer<[u32]>> {
+pub fn calculate_index_buffer_polygon(
+    queue: &Arc<Queue>,
+    amount_of_vertices: usize,
+) -> Arc<CpuAccessibleBuffer<[u32]>> {
     let indices = calculate_indices_polygon(amount_of_vertices - 1);
     CpuAccessibleBuffer::from_iter(
         queue.device().clone(),
@@ -190,11 +209,12 @@ impl RenderPassExecutor {
             .unwrap();
     }
 
-    // TODO: Make VertexTest a generic
+    // TODO: Make PushConstants generic
     pub fn do_pass<T>(
         &mut self,
         vertex_buffer: Arc<CpuAccessibleBuffer<[T]>>,
         index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
+        push_constants: Option<PushConstants>,
     ) where
         T: Zeroable + Pod,
         [T]: BufferContents,
@@ -215,6 +235,24 @@ impl RenderPassExecutor {
             .bind_pipeline_graphics(self.pipeline.clone())
             .bind_vertex_buffers(0, vertex_buffer)
             .bind_index_buffer(index_buffer);
+
+        if let Some(pc) = push_constants {
+            builder.push_constants(self.pipeline.layout().clone(), 0, pc);
+        }
+
+        //                         .push_constants(pipeline.layout().clone(), 0, push_constants)
+        //                         .bind_descriptor_sets(
+        //                             PipelineBindPoint::Graphics,
+        //                             pipeline.layout().clone(),
+        //                             0,
+        //                             descriptor_sets[image_num].clone(),
+        //                         )
+        //                         .bind_vertex_buffers(0, vertex_buffer.clone())
+        //                         .bind_index_buffer(index_buffer.clone())
+        //                         .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
+        //                         .unwrap()
+        //                         .end_render_pass()
+        //                         .unwrap();
 
         if let Some(descriptor_set) = &self.descriptor_set {
             builder.bind_descriptor_sets(
@@ -315,14 +353,14 @@ impl VulkanoDevice {
         mod vs {
             vulkano_shaders::shader! {
                 ty: "vertex",
-                path: "src/shaders/test_shader.vert"
+                path: "src/shaders/basic_pipeline.vert"
             }
         }
 
         mod fs {
             vulkano_shaders::shader! {
                 ty: "fragment",
-                path: "src/shaders/test_shader.frag"
+                path: "src/shaders/basic_pipeline.frag"
             }
         }
 
@@ -343,7 +381,7 @@ impl VulkanoDevice {
             queue,
             render_pass,
             pipeline,
-            descriptor_sets: Vec::new(),
+            descriptor_sets: Vec::new()
         }
     }
 
@@ -351,11 +389,13 @@ impl VulkanoDevice {
         &mut self,
         before_future: F,
         final_image: Arc<dyn ImageViewAbstract + 'static>,
-        render_object_query: Query<&RenderObject<MyVertex>, With<RenderObject<MyVertex>>>,
+        render_object_query: Query<(&RenderObject<SimpleVertex>, &Light)>,
+        mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
     where
         F: GpuFuture + 'static,
     {
+        let dims = final_image.image().dimensions().width_height();
         let descriptor_set = PersistentDescriptorSet::new(
             self.pipeline.layout().set_layouts()[0].clone(),
             [WriteDescriptorSet::image_view(
@@ -374,8 +414,20 @@ impl VulkanoDevice {
         );
 
         executor.clear_framebuffer_image();
-        for render_object in &render_object_query {
-            executor.do_pass(render_object.vertex_buffer.clone(), render_object.index_buffer.clone());
+        for (render_object, light) in &render_object_query {
+            executor.do_pass(
+                render_object.vertex_buffer.as_ref().unwrap().clone(),
+                render_object.index_buffer.as_ref().unwrap().clone(),
+                Some(PushConstants {
+                    mouse_pos: mouse_position.position.clone(),
+                    resolution: [dims[0] as f32, dims[1] as f32],
+                    time_passed: 0.,
+                    light_brightness: light.brightness,
+                    light_radius: light.get_radius(),
+                    light_center: light.get_center().clone(),
+                    light_color: light.color,
+                }),
+            );
         }
         executor.execute(self.queue.clone(), before_future)
     }
@@ -538,7 +590,7 @@ impl VulkanoDevice {
 
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .vertex_input_state(BuffersDefinition::new().vertex::<MyVertex>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<SimpleVertex>())
             .input_assembly_state(InputAssemblyState::new())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
@@ -860,27 +912,27 @@ impl VulkanoDevice {
 }
 
 // TODO: Draw a concave polygon more efficiently
-fn create_vertices(
-    env_objects: &Vec<Box<dyn EnvironmentObject>>,
-    light: &mut Light,
-) -> (Vec<MyVertex>, Vec<u32>) {
-    let light_polygon = light.calculate_light_polygon(env_objects);
-    let light_vertices = light_polygon.iter().map(|p| MyVertex {
-        position: [p.x, p.y],
-    });
+// fn create_vertices(
+//     env_objects: &Vec<Box<dyn EnvironmentObject>>,
+//     light: &mut Light,
+// ) -> (Vec<SimpleVertex>, Vec<u32>) {
+//     let light_polygon = light.calculate_light_polygon(env_objects);
+//     let light_vertices = light_polygon.iter().map(|p| SimpleVertex {
+//         position: [p.x, p.y],
+//     });
 
-    let mut vertices = vec![MyVertex {
-        position: [light.get_center().x, light.get_center().y],
-    }];
-    vertices.extend(light_vertices);
-    while vertices.len() < 3 {
-        vertices.push(MyVertex { position: [0., 0.] });
-    }
+//     let mut vertices = vec![SimpleVertex {
+//         position: [light.get_center().x, light.get_center().y],
+//     }];
+//     vertices.extend(light_vertices);
+//     while vertices.len() < 3 {
+//         vertices.push(SimpleVertex { position: [0., 0.] });
+//     }
 
-    let indices = calculate_indices_polygon(vertices.len() - 1);
+//     let indices = calculate_indices_polygon(vertices.len() - 1);
 
-    (vertices, indices)
-}
+//     (vertices, indices)
+// }
 
 fn generate_random_lights(lights: &mut Vec<Light>, amount_of_lights: usize) {
     if lights.len() > 1 {

@@ -1,5 +1,6 @@
 use bevy::{
     diagnostic::{Diagnostics, FrameTimeDiagnosticsPlugin},
+    input::mouse::{self, MouseMotion},
     prelude::*,
     render::view::window,
     window::WindowId,
@@ -7,7 +8,18 @@ use bevy::{
 use bevy_vulkano::{BevyVulkanoWindows, PipelineSyncData};
 use vulkano::{image::ImageAccess, sync::GpuFuture};
 
-use crate::vulkano_backend::vulkano_device::{MyVertex, RenderObject, VertexTest, VulkanoDevice};
+use crate::{
+    game_object::game_object::{EnvironmentObjectComp, Light, MouseLight, AABB},
+    vulkano_backend::vulkano_device::{RenderObject, SimpleVertex, VertexTest, VulkanoDevice},
+    MousePosition,
+};
+
+use rand::Rng;
+use std::sync::Arc;
+
+use vulkano::device::Queue;
+
+use nalgebra_glm as glm;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 pub enum RenderStage {
@@ -64,54 +76,97 @@ impl Plugin for MainRenderPlugin {
     }
 }
 
-/// Insert our render pass at startup
 fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<BevyVulkanoWindows>) {
     let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
     let queue = window_renderer.graphics_queue();
     let format = window_renderer.swapchain_format();
 
-    let vertices = vec![
-        MyVertex {
-            position: [-0.0, -0.0],
-        },
-        MyVertex {
-            position: [-0.5, -0.5],
-        },
-        MyVertex {
-            position: [0.5, -0.5],
-        },
-        MyVertex {
-            position: [0.5, 0.5],
-        },
-        MyVertex {
-            position: [-0.5, 0.5],
-        },
-    ];
-    let render_object = RenderObject::new(&queue, vertices);
-    commands.spawn().insert(render_object);
+    let render_object = RenderObject::<SimpleVertex>::new(queue.clone());
 
-    let vertices = vec![
-        MyVertex {
-            position: [-0.0, -0.0],
-        },
-        MyVertex {
-            position: [-0.75, -0.75],
-        },
-        MyVertex {
-            position: [0.8, -0.2],
-        },
-        MyVertex {
-            position: [0.1, 0.3],
-        },
-        MyVertex {
-            position: [-0.2, 0.7],
-        },
-    ];
-    let render_object = RenderObject::new(&queue, vertices);
-    commands.spawn().insert(render_object);
+    commands
+        .spawn()
+        .insert(Light::new(
+            glm::Vec3::new(0.1, 0.45, 0.7),
+            glm::Vec2::new(0., 0.),
+            200.,
+            3.,
+        ))
+        .insert(render_object)
+        .insert(MouseLight);
 
-    let vulkano_device = VulkanoDevice::new::<MyVertex>(queue, format);
+    generate_random_lights(&mut commands, &queue, 40);
+    generate_random_aabbs(&mut commands, 50);
+
+    let bounding_box = AABB::new(glm::Vec2::new(0., 0.), glm::Vec2::new(1280., 720.));
+    commands
+        .spawn()
+        .insert(bounding_box)
+        .insert(EnvironmentObjectComp);
+
+    let vulkano_device = VulkanoDevice::new::<SimpleVertex>(queue, format);
     commands.insert_resource(vulkano_device);
+}
+
+fn generate_random_aabbs(commands: &mut Commands, amount_of_aabbs: usize) {
+    let offset = 20.;
+    let min_size = 30.;
+    let max_size = 100.;
+
+    let mut rng = rand::thread_rng();
+    for i in 0..amount_of_aabbs {
+        let min = glm::Vec2::new(
+            rng.gen_range(offset..1280. - offset - max_size),
+            rng.gen_range(offset..720. - offset - max_size),
+        );
+        let size = glm::Vec2::new(
+            rng.gen_range(min_size..max_size),
+            rng.gen_range(min_size..max_size),
+        );
+        commands
+            .spawn()
+            .insert(AABB::new(min, min + size))
+            .insert(EnvironmentObjectComp);
+    }
+}
+
+fn generate_random_lights(commands: &mut Commands, queue: &Arc<Queue>, amount_of_lights: usize) {
+    let colors = vec![
+        glm::Vec3::new(0.85, 0.33, 0.04),
+        glm::Vec3::new(0.23, 0.85, 0.09),
+        glm::Vec3::new(0.85, 0.06, 0.2),
+        glm::Vec3::new(0.09, 0.7, 0.7),
+        glm::Vec3::new(0.85, 0.06, 0.06),
+    ];
+
+    let positions = vec![
+        glm::Vec2::new(101., 101.),
+        glm::Vec2::new(351., 101.),
+        glm::Vec2::new(701., 101.),
+        glm::Vec2::new(101., 351.),
+        glm::Vec2::new(351., 351.),
+        glm::Vec2::new(701., 351.),
+        glm::Vec2::new(101., 551.),
+        glm::Vec2::new(351., 551.),
+        glm::Vec2::new(701., 551.),
+    ];
+
+    let mut rng = rand::thread_rng();
+    for i in 0..amount_of_lights {
+        let color_offset = glm::Vec3::new(
+            rng.gen_range(0.0..0.2) - 0.1,
+            rng.gen_range(0.0..0.2) - 0.1,
+            rng.gen_range(0.0..0.2) - 0.1,
+        );
+        let light = Light::new(
+            colors[i % colors.len()] + color_offset,
+            glm::Vec2::new(rng.gen_range(30.0..1250.0), rng.gen_range(30.0..690.0)),
+            rng.gen_range(100.0..300.0),
+            // 100.0,
+            rng.gen_range(0.2..0.8),
+        );
+        let render_object = RenderObject::<SimpleVertex>::new(queue.clone());
+        commands.spawn().insert(light).insert(render_object);
+    }
 }
 
 fn pre_render_setup_system(
@@ -153,18 +208,25 @@ fn post_render_system(
     }
 }
 
-// Only draw primary now...
-// You could render different windows in their own systems...
 pub fn main_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
     diagnostics: Res<Diagnostics>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut vulkano_device: ResMut<VulkanoDevice>,
-    render_object_query: Query<&RenderObject<MyVertex>, With<RenderObject<MyVertex>>>,
+    light_query: Query<(&RenderObject<SimpleVertex>, &Light)>,
+    env_object_query: Query<(&EnvironmentObjectComp, &AABB)>,
+    mouse_position: Res<MousePosition>,
 ) {
     if let Some(diag) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
         if let Some(avg) = diag.average() {
-            println!("{:.2} fps ({:.2} ms/frame)", avg, 1. / avg * 1000.);
+            let primary = vulkano_windows
+                .get_winit_window(WindowId::primary())
+                .unwrap();
+            primary.set_title(&format!(
+                "Bevy Vulkano Game Of Life {:.2} fps ({:.2} ms/frame)",
+                avg,
+                1. / avg * 1000.
+            ));
         }
     }
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
@@ -181,7 +243,8 @@ pub fn main_render_system(
         let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
             before_future,
             window_renderer.swapchain_image_view(),
-            render_object_query,
+            light_query,
+            &mouse_position,
         );
 
         let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();

@@ -1,28 +1,15 @@
 #version 450
 
-struct Light
-{
-    vec2 center;
-    float radius;
-    float brightness;
-    vec3 color;
-    float fillerData;
-};
-
-// layout(set = 0, binding = 0) buffer Data {
-//     Light lights[];
-// } data;
-
 layout(push_constant) uniform PushConstantData {
     vec2 mousePos;
     vec2 resolution;
-    vec2 dimensions;
+    float timePassed;
+    float lightRadius;
     vec2 lightCenter;
     vec3 lightColor;
     float lightBrightness;
-    float lightRadius;
-    float timePassed;
 } pc;
+
 
 layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput input_attachment;
 layout(location = 0) out vec4 f_color;

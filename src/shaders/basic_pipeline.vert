@@ -3,10 +3,13 @@
 layout(push_constant) uniform PushConstantData {
     vec2 mousePos;
     vec2 resolution;
-    vec2 dimensions;
     float timePassed;
-    float amountOfLights;
+    float lightRadius;
+    vec2 lightCenter;
+    vec3 lightColor;
+    float lightBrightness;
 } pc;
+
 
 layout(location = 0) in vec2 position;
 
@@ -17,5 +20,5 @@ void main() {
 }
 
 vec2 worldToScreen(vec2 worldPos) {
-    return (worldPos / pc.dimensions) * 2. - 1.;
+    return (worldPos / pc.resolution) * 2. - 1.;
 }
