@@ -1,6 +1,11 @@
 use crate::game_object::help_functions::calculate_clockwise_points;
 
+use bevy::prelude::*;
 use nalgebra_glm as glm;
+
+
+#[derive(Component)]
+pub struct EnvironmentObjectComp;
 
 pub trait EnvironmentObject {
     fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision>;
@@ -9,8 +14,8 @@ pub trait EnvironmentObject {
 
 #[derive(Debug)]
 pub struct Collision {
-    t: f32,
-    collision_points: Vec<glm::Vec2>,
+    pub t: f32,
+    pub collision_points: Vec<glm::Vec2>,
 }
 
 impl Collision {
@@ -24,10 +29,10 @@ impl Collision {
 
 #[derive(Debug)]
 pub struct Ray {
-    orig: glm::Vec2,
-    dir: glm::Vec2,
-    inv_dir: glm::Vec2,
-    t: f32,
+    pub orig: glm::Vec2,
+    pub dir: glm::Vec2,
+    pub inv_dir: glm::Vec2,
+    pub t: f32,
 }
 
 impl Ray {
@@ -44,7 +49,7 @@ impl Ray {
         let mut dir = p - orig;
         let t = dir.normalize_mut();
 
-        Self::new(orig, dir, t * offset_perc.unwrap_or(0.999))
+        Self::new(orig, dir, t * offset_perc.unwrap_or(0.9))
     }
 
     fn new_from_angle(orig: glm::Vec2, angle: f32, t: f32) -> Self {
@@ -73,7 +78,7 @@ impl Ray {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Component)]
 pub struct Line {
     p0: glm::Vec2,
     p1: glm::Vec2,
@@ -108,7 +113,7 @@ impl EnvironmentObject for Line {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Component)]
 pub struct AABB {
     pub min: glm::Vec2,
     pub max: glm::Vec2,
@@ -160,7 +165,7 @@ impl EnvironmentObject for AABB {
 
         let t = if tmin > 0. { tmin } else { tmax };
 
-        if !ignore_t && t > ray.t {
+        if !ignore_t && t > ray.t || t < 0. {
             return None;
         }
 
@@ -173,6 +178,7 @@ impl EnvironmentObject for AABB {
 }
 
 // 2 dotted lines in parralel form optical illusion when light in center
+#[derive(Debug, Component)]
 pub struct DottedLine {
     bounding_line: Line,
     lines: Vec<Line>,
@@ -228,31 +234,56 @@ impl EnvironmentObject for DottedLine {
     }
 }
 
+#[derive(Component)]
+pub struct Position {
+    pub position: glm::Vec2,
+}
+
+#[derive(Component)]
+pub struct Velocity {
+    pub velocity: glm::Vec2,
+}
+
+#[derive(Component)]
+pub struct MouseLight;
+
+#[derive(Component)]
+pub struct PlayerLight;
+
+#[derive(Component)]
 pub struct Light {
     pub color: glm::Vec3,
-    center: glm::Vec2,
     radius: f32,
     max_radius: f32,
     pub brightness: f32,
-    polygon: Option<Vec<glm::Vec2>>,
+    pub polygon: Option<Vec<glm::Vec2>>,
 }
 
 impl Light {
-    pub fn new(color: glm::Vec3, center: glm::Vec2, radius: f32, brightness: f32) -> Self {
-        Light { color, center, radius, max_radius: radius, brightness, polygon: None }
+    pub fn new(color: glm::Vec3, radius: f32, brightness: f32) -> Self {
+        Light {
+            color,
+            radius,
+            max_radius: radius,
+            brightness,
+            polygon: None,
+        }
     }
 
-    pub fn new_with_max_radius(color: glm::Vec3, center: glm::Vec2, radius: f32, max_radius: f32, brightness: f32) -> Self {
-        Light { color, center, radius, max_radius, brightness, polygon: None }
-    }
-
-    pub fn get_center<'a>(&'a self) -> &'a glm::Vec2 {
-        return &self.center;
-    }
-
-    pub fn set_center(&mut self, center: glm::Vec2) {
-        self.center = center;
-        self.polygon = None;
+    pub fn new_with_max_radius(
+        color: glm::Vec3,
+        center: glm::Vec2,
+        radius: f32,
+        max_radius: f32,
+        brightness: f32,
+    ) -> Self {
+        Light {
+            color,
+            radius,
+            max_radius,
+            brightness,
+            polygon: None,
+        }
     }
 
     pub fn get_radius(&self) -> f32 {
@@ -272,36 +303,25 @@ impl Light {
         self.polygon = None;
     }
 
-
-    pub fn get_buffer_data(&self) -> [f32; 8] {
-        [
-            self.center.x,
-            self.center.y,
-            self.radius,
-            self.brightness,
-            self.color.x,
-            self.color.y,
-            self.color.z,
-            0.,
-        ]
-    }
-
+    // TODO: Add optimizations back in
     pub fn calculate_light_polygon(
         &mut self,
-        env_objects: &Vec<Box<dyn EnvironmentObject>>,
+        position: &Position,
+        env_object_query: &Query<&AABB, With<EnvironmentObjectComp>>,
     ) -> Vec<glm::Vec2> {
         if let Some(polygon) = &self.polygon {
             return polygon.clone();
         }
 
-        let mut p_rays_go: Vec<(&Box<dyn EnvironmentObject>, Vec<Ray>)> = Vec::new(); // Vec::with_capacity(points.len());
+        // let mut p_rays_go: Vec<(&Box<dyn EnvironmentObject>, Vec<Ray>)> = Vec::new(); // Vec::with_capacity(points.len());
+        let mut p_rays_go: Vec<Ray> = Vec::new(); // Vec::with_capacity(points.len());
 
-        for go in env_objects {
-            let mut ray_env_object = None;
+        for go in env_object_query {
+            // let mut ray_env_object = None;
             for p in go.get_corners() {
-                let p_ray = Ray::new_between_points(self.center.clone(), &p, None);
+                let p_ray = Ray::new_between_points(position.position.clone(), &p, None);
                 let mut add_point = true;
-                for go_ in env_objects {
+                for go_ in env_object_query {
                     if let Some(coll) = go_.ray_collision(&p_ray, false) {
                         add_point = false;
                         break;
@@ -309,48 +329,49 @@ impl Light {
                 }
 
                 if add_point {
-                    if let Some(ray_go) = ray_env_object {
-                        // let test = p_rays_go.last_mut().unwrap().1.push(p_ray);
-                        p_rays_go.last_mut().expect("Couldn't get last item of p_rays_go").1.push(p_ray);
-                    } else {
-                        p_rays_go.push((go, vec![p_ray]));
-                        ray_env_object = Some(go);
-                    }
+                    p_rays_go.push(p_ray);
+                    // if let Some(ray_go) = ray_env_object {
+                    //     // let test = p_rays_go.last_mut().unwrap().1.push(p_ray);
+                    //     p_rays_go.last_mut().expect("Couldn't get last item of p_rays_go").1.push(p_ray);
+                    // } else {
+                    //     p_rays_go.push((go, vec![p_ray]));
+                    //     ray_env_object = Some(go);
+                    // }
                 }
             }
         }
 
         let mut actual_points: Vec<glm::Vec2> = Vec::with_capacity(p_rays_go.len() * 2);
-        for (ray_go, p_rays) in p_rays_go {
-            for p_ray in p_rays {
-                let p_angle_ray = p_ray.get_angle_rays(None);
+        // for (ray_go, p_rays) in p_rays_go {
+        for p_ray in p_rays_go {
+            let p_angle_ray = p_ray.get_angle_rays(None);
 
-                for p_ray in p_angle_ray {
-                    let mut t_near = f32::MAX;
-                    let mut closest_point = None;
+            for p_ray in p_angle_ray {
+                let mut t_near = f32::MAX;
+                let mut closest_point = None;
 
-                    if let Some(coll) = ray_go.ray_collision(&p_ray, true) {
-                        actual_points.push(coll.collision_points[0]);
-                        continue;
-                    }
+                // if let Some(coll) = ray_go.ray_collision(&p_ray, true) {
+                //     actual_points.push(coll.collision_points[0]);
+                //     continue;
+                // }
 
-                    for go in env_objects {
-                        if let Some(coll) = go.ray_collision(&p_ray, true) {
-                            if coll.t < t_near {
-                                t_near = coll.t;
-                                closest_point = Some(coll.collision_points[0]);
-                            }
+                for go in env_object_query {
+                    if let Some(coll) = go.ray_collision(&p_ray, true) {
+                        if coll.t < t_near {
+                            t_near = coll.t;
+                            closest_point = Some(coll.collision_points[0]);
                         }
                     }
+                }
 
-                    if let Some(cp) = closest_point {
-                        actual_points.push(cp);
-                    }
+                if let Some(cp) = closest_point {
+                    actual_points.push(cp);
                 }
             }
         }
+        // }
 
-        let polygon = calculate_clockwise_points(actual_points, self.center);
+        let polygon = calculate_clockwise_points(actual_points, position.position);
         let polygon_c = polygon.clone();
         self.polygon = Some(polygon);
 

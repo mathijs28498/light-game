@@ -1,28 +1,33 @@
+use bevy::prelude::*;
 use bytemuck::{Pod, Zeroable};
+use rand::{seq::index, Rng};
 use std::{
-    sync::Arc,
-    time::{Duration, SystemTime}, alloc::System,
+    alloc::System,
     cmp::max,
+    sync::Arc,
+    time::{Duration, SystemTime},
 };
 use vulkano::{
-    buffer::{BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
+    buffer::{BufferContents, BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
     command_buffer::{
-        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage, RenderPassBeginInfo,
-        SubpassContents,
+        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage,
+        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents,
     },
     descriptor_set::{DescriptorSet, PersistentDescriptorSet, WriteDescriptorSet},
     device::{
         physical::{PhysicalDevice, PhysicalDeviceType},
         Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
     },
+    format::Format,
     image::ImageAspects,
+    image::ImageViewAbstract,
     image::{view::ImageView, ImageAccess, ImageLayout, ImageUsage, SwapchainImage},
     impl_vertex,
     instance::{Instance, InstanceCreateInfo},
     pipeline::{
         graphics::{
             input_assembly::InputAssemblyState,
-            vertex_input::BuffersDefinition,
+            vertex_input::{BuffersDefinition, Vertex},
             viewport::{Viewport, ViewportState},
         },
         GraphicsPipeline, Pipeline, PipelineBindPoint,
@@ -38,7 +43,6 @@ use vulkano::{
     },
     sync::{self, FlushError, GpuFuture},
 };
-use rand::Rng;
 use vulkano_win::VkSurfaceBuild;
 use winit::{
     event::{Event, KeyboardInput, VirtualKeyCode, WindowEvent},
@@ -46,161 +50,267 @@ use winit::{
     window::{Window, WindowBuilder},
 };
 
-use crate::game_object::{
-    game_object::{DottedLine, EnvironmentObject, Light, Line, AABB},
-    help_functions::{calculate_indices_polygon, get_all_points},
+use crate::{
+    game_object::{
+        game_object::{DottedLine, EnvironmentObject, Light, Line, AABB, Position},
+        help_functions::{calculate_indices_polygon, get_all_points},
+    },
+    MousePosition,
 };
 use nalgebra_glm as glm;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-struct Vertex {
-    position: [f32; 2],
+pub struct VertexTest {
+    pub position: [f32; 2],
+    pub color: [f32; 3],
 }
-impl_vertex!(Vertex, position);
+impl_vertex!(VertexTest, position, color);
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+pub struct SimpleVertex {
+    pub position: [f32; 2],
+}
+impl_vertex!(SimpleVertex, position);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-struct PushConstants {
+pub struct PushConstants {
     mouse_pos: glm::Vec2,
     resolution: [f32; 2],
-    dimensions: [f32; 2],
+    time_passed: f32,
+    light_radius: f32,
     light_center: glm::Vec2,
     light_color: glm::Vec3,
     light_brightness: f32,
-    light_radius: f32,
-    time_passed: f32,
 }
 
-pub struct VulkanoDevice {
-    event_loop: Option<EventLoop<()>>,
-    surface: Arc<Surface<Window>>,
-    device: Arc<Device>,
+// Create generic for VertexTest
+// Add vertices to constructor
+#[derive(Component)]
+pub struct RenderObject<T>
+where
+    T: Zeroable + Pod,
+    [T]: BufferContents,
+{
+    vertex_buffer: Option<Arc<CpuAccessibleBuffer<[T]>>>,
+    index_buffer: Option<Arc<CpuAccessibleBuffer<[u32]>>>,
     queue: Arc<Queue>,
-    swapchain: Arc<Swapchain<Window>>,
-    render_pass: Arc<RenderPass>,
-    pipeline: Arc<GraphicsPipeline>,
-    viewport: Viewport,
-    framebuffers: Vec<Arc<Framebuffer>>,
-    descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
 }
 
-impl VulkanoDevice {
-    pub fn new_with_initialization() -> VulkanoDevice {
-        let required_extensions = vulkano_win::required_extensions();
+impl<T> RenderObject<T>
+where
+    T: Zeroable + Pod,
+    [T]: BufferContents,
+{
+    pub fn new(queue: Arc<Queue>) -> Self {
+        // let index_buffer = calculate_index_buffer_polygon(&queue, vertices.len());
 
-        let instance = Instance::new(InstanceCreateInfo {
-            enabled_extensions: required_extensions,
-            enumerate_portability: true,
-            ..Default::default()
-        })
+        // let vertex_buffer = CpuAccessibleBuffer::from_iter(
+        //     queue.device().clone(),
+        //     BufferUsage::vertex_buffer(),
+        //     false,
+        //     vertices,
+        // )
+        // .unwrap();
+
+        Self {
+            vertex_buffer: None,
+            index_buffer: None,
+            queue,
+        }
+    }
+
+    pub fn update_vertex_buffer(&mut self, vertices: Vec<T>) {
+        let index_buffer = calculate_index_buffer_polygon(&self.queue, vertices.len());
+
+        let vertex_buffer = CpuAccessibleBuffer::from_iter(
+            self.queue.device().clone(),
+            BufferUsage::vertex_buffer(),
+            false,
+            vertices,
+        )
         .unwrap();
 
-        let event_loop = EventLoop::new();
-        let surface = WindowBuilder::new()
-            .build_vk_surface(&event_loop, instance.clone())
-            .unwrap();
+        self.vertex_buffer = Some(vertex_buffer);
+        self.index_buffer = Some(index_buffer);
+    }
+}
 
-        let device_extensions = DeviceExtensions {
-            khr_swapchain: true,
-            ..DeviceExtensions::none()
-        };
+pub fn calculate_index_buffer_polygon(
+    queue: &Arc<Queue>,
+    amount_of_vertices: usize,
+) -> Arc<CpuAccessibleBuffer<[u32]>> {
+    let indices = calculate_indices_polygon(amount_of_vertices - 1);
+    CpuAccessibleBuffer::from_iter(
+        queue.device().clone(),
+        BufferUsage::index_buffer(),
+        false,
+        indices,
+    )
+    .unwrap()
+}
 
-        let (physical_device, queue_family) = PhysicalDevice::enumerate(&instance)
-            .filter(|&p| p.supported_extensions().is_superset_of(&device_extensions))
-            .filter_map(|p| {
-                p.queue_families()
-                    .find(|&q| {
-                        q.supports_graphics() && q.supports_surface(&surface).unwrap_or(false)
-                    })
-                    .map(|q| (p, q))
-            })
-            .min_by_key(|(p, _)| match p.properties().device_type {
-                PhysicalDeviceType::DiscreteGpu => 0,
-                PhysicalDeviceType::IntegratedGpu => 1,
-                PhysicalDeviceType::VirtualGpu => 2,
-                PhysicalDeviceType::Cpu => 3,
-                PhysicalDeviceType::Other => 4,
-            })
-            .expect("No suitable physical device found");
+pub struct RenderPassExecutor {
+    pipeline: Arc<GraphicsPipeline>,
+    descriptor_set: Option<Arc<PersistentDescriptorSet>>,
+    framebuffer: Arc<Framebuffer>,
+    command_buffer_builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
+    viewport: Viewport,
+}
 
-        println!(
-            "Using device: {} (type: {:?})",
-            physical_device.properties().device_name,
-            physical_device.properties().device_type,
-        );
-
-        let (device, mut queues) = Device::new(
-            physical_device,
-            DeviceCreateInfo {
-                enabled_extensions: device_extensions,
-                queue_create_infos: vec![QueueCreateInfo::family(queue_family)],
-
+impl RenderPassExecutor {
+    pub fn new(
+        pipeline: Arc<GraphicsPipeline>,
+        descriptor_set: Option<Arc<PersistentDescriptorSet>>,
+        queue: Arc<Queue>,
+        render_pass: Arc<RenderPass>,
+        image: Arc<dyn ImageViewAbstract + 'static>,
+    ) -> Self {
+        let dims = image.image().dimensions().width_height();
+        let framebuffer = Framebuffer::new(
+            render_pass,
+            FramebufferCreateInfo {
+                attachments: vec![image],
                 ..Default::default()
             },
         )
         .unwrap();
 
-        let queue = queues.next().unwrap();
+        let builder = AutoCommandBufferBuilder::primary(
+            queue.device().clone(),
+            queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
 
-        let (mut swapchain, images) = {
-            let surface_capabilities = physical_device
-                .surface_capabilities(&surface, Default::default())
-                .unwrap();
-
-            let image_format = Some(
-                physical_device
-                    .surface_formats(&surface, Default::default())
-                    .unwrap()[0]
-                    .0,
-            );
-
-            Swapchain::new(
-                device.clone(),
-                surface.clone(),
-                SwapchainCreateInfo {
-                    min_image_count: surface_capabilities.min_image_count,
-                    image_format,
-                    image_extent: surface.window().inner_size().into(),
-                    image_usage: ImageUsage {
-                        input_attachment: true,
-                        transfer_dst: true,
-                        ..ImageUsage::color_attachment()
-                    },
-                    composite_alpha: surface_capabilities
-                        .supported_composite_alpha
-                        .iter()
-                        .next()
-                        .unwrap(),
-
-                    ..Default::default()
-                },
-            )
-            .unwrap()
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [dims[0] as f32, dims[1] as f32],
+            depth_range: 0.0..1.0,
         };
 
-        mod vs {
-            vulkano_shaders::shader! {
-                ty: "vertex",
-                path: "src/shaders/basic_pipeline.vert"
-            }
+        Self {
+            pipeline,
+            descriptor_set,
+            framebuffer,
+            command_buffer_builder: Some(builder),
+            viewport,
+        }
+    }
+
+    pub fn clear_framebuffer_image(&mut self) {
+        let fb_image = self.framebuffer.attachments()[0].image();
+        self.command_buffer_builder
+            .as_mut()
+            .unwrap()
+            .clear_color_image(ClearColorImageInfo::image(fb_image))
+            .unwrap();
+    }
+
+    // TODO: Make PushConstants generic
+    pub fn do_pass<T>(
+        &mut self,
+        vertex_buffer: Arc<CpuAccessibleBuffer<[T]>>,
+        index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
+        push_constants: Option<PushConstants>,
+    ) where
+        T: Zeroable + Pod,
+        [T]: BufferContents,
+    {
+        let index_length = index_buffer.len();
+        let builder = self.command_buffer_builder.as_mut().unwrap();
+
+        builder
+            .begin_render_pass(
+                RenderPassBeginInfo {
+                    clear_values: vec![None],
+                    ..RenderPassBeginInfo::framebuffer(self.framebuffer.clone())
+                },
+                SubpassContents::Inline,
+            )
+            .unwrap()
+            .set_viewport(0, [self.viewport.clone()])
+            .bind_pipeline_graphics(self.pipeline.clone())
+            .bind_vertex_buffers(0, vertex_buffer)
+            .bind_index_buffer(index_buffer);
+
+        if let Some(pc) = push_constants {
+            builder.push_constants(self.pipeline.layout().clone(), 0, pc);
         }
 
-        mod fs {
-            vulkano_shaders::shader! {
-                ty: "fragment",
-                path: "src/shaders/basic_pipeline.frag"
-            }
+        //                         .push_constants(pipeline.layout().clone(), 0, push_constants)
+        //                         .bind_descriptor_sets(
+        //                             PipelineBindPoint::Graphics,
+        //                             pipeline.layout().clone(),
+        //                             0,
+        //                             descriptor_sets[image_num].clone(),
+        //                         )
+        //                         .bind_vertex_buffers(0, vertex_buffer.clone())
+        //                         .bind_index_buffer(index_buffer.clone())
+        //                         .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
+        //                         .unwrap()
+        //                         .end_render_pass()
+        //                         .unwrap();
+
+        if let Some(descriptor_set) = &self.descriptor_set {
+            builder.bind_descriptor_sets(
+                PipelineBindPoint::Graphics,
+                self.pipeline.layout().clone(),
+                0,
+                descriptor_set.clone(),
+            );
         }
 
-        let vs = vs::load(device.clone()).unwrap();
-        let fs = fs::load(device.clone()).unwrap();
+        builder
+            .draw_indexed(index_length as u32, 1, 0, 0, 0)
+            .unwrap()
+            .end_render_pass()
+            .unwrap();
+    }
 
+    fn execute<F>(&mut self, queue: Arc<Queue>, before_future: F) -> Box<dyn GpuFuture>
+    where
+        F: GpuFuture + 'static,
+    {
+        before_future
+            .then_execute(
+                queue,
+                self.command_buffer_builder.take().unwrap().build().unwrap(),
+            )
+            .unwrap()
+            .boxed()
+    }
+}
+
+pub struct VulkanoDevice {
+    queue: Arc<Queue>,
+    render_pass: Arc<RenderPass>,
+    pipeline: Arc<GraphicsPipeline>,
+    descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
+    // descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
+    // event_loop: Option<EventLoop<()>>,
+    // surface: Arc<Surface<Window>>,
+    // device: Arc<Device>,
+    // queue: Arc<Queue>,
+    // swapchain: Arc<Swapchain<Window>>,
+    // render_pass: Arc<RenderPass>,
+    // viewport: Viewport,
+    // framebuffers: Vec<Arc<Framebuffer>>,
+    // descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
+}
+
+impl VulkanoDevice {
+    pub fn new<T>(queue: Arc<Queue>, final_output_format: Format) -> Self
+    where
+        T: Vertex,
+    {
         let render_pass = RenderPass::new(
-            device.clone(),
+            queue.device().clone(),
             RenderPassCreateInfo {
                 attachments: vec![AttachmentDescription {
-                    format: Some(swapchain.image_format()),
+                    format: Some(final_output_format),
                     // We keep the previous contents of the swapchain image unchanged...
                     load_op: LoadOp::Load,
                     // ...and store the result.
@@ -209,8 +319,6 @@ impl VulkanoDevice {
                     // must be transitioned into a different one if you want to use the data. You can
                     // use any other layout, but `General` is the only one which works for all purposes.
                     initial_layout: ImageLayout::General,
-                    // The only valid image layout for presenting a swapchain image to the surface is
-                    // `PresentSrc`.
                     final_layout: ImageLayout::PresentSrc,
                     ..Default::default()
                 }],
@@ -242,441 +350,87 @@ impl VulkanoDevice {
         )
         .unwrap();
 
-        // TODO: Look into triangle strip in assembly_state
+        mod vs {
+            vulkano_shaders::shader! {
+                ty: "vertex",
+                path: "src/shaders/basic_pipeline.vert"
+            }
+        }
+
+        mod fs {
+            vulkano_shaders::shader! {
+                ty: "fragment",
+                path: "src/shaders/basic_pipeline.frag"
+            }
+        }
+
+        let vs = vs::load(queue.device().clone()).unwrap();
+        let fs = fs::load(queue.device().clone()).unwrap();
+
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .vertex_input_state(BuffersDefinition::new().vertex::<Vertex>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<T>())
             .input_assembly_state(InputAssemblyState::new())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
             .fragment_shader(fs.entry_point("main").unwrap(), ())
-            .build(device.clone())
+            .build(queue.device().clone())
             .unwrap();
 
-        let mut viewport = Viewport {
-            origin: [0.0, 0.0],
-            dimensions: [0.0, 0.0],
-            depth_range: 0.0..1.0,
-        };
-
-        let (mut framebuffers, mut descriptor_sets) =
-            window_size_dependent_setup(&images, render_pass.clone(), &pipeline, &mut viewport);
-
-        VulkanoDevice {
-            event_loop: Some(event_loop),
-            surface,
-            device,
+        Self {
             queue,
-            swapchain,
             render_pass,
             pipeline,
-            viewport,
-            framebuffers,
-            descriptor_sets,
+            descriptor_sets: Vec::new()
         }
     }
 
-    pub fn run(&mut self) {
-        let mut recreate_swapchain = false;
-        let mut previous_frame_end = Some(sync::now(self.device.clone()).boxed());
-        let surface = self.surface.clone();
-        let mut device = self.device.clone();
-        let mut queue = self.queue.clone();
-        let mut swapchain = self.swapchain.clone();
-        let mut render_pass = self.render_pass.clone();
-        let mut pipeline = self.pipeline.clone();
-        let mut viewport = self.viewport.clone();
-        let mut framebuffers = self.framebuffers.clone();
-        let mut descriptor_sets = self.descriptor_sets.clone();
+    pub fn do_pass<F>(
+        &mut self,
+        before_future: F,
+        final_image: Arc<dyn ImageViewAbstract + 'static>,
+        light_query: Query<(&RenderObject<SimpleVertex>, &Position, &Light)>,
+        mouse_position: &MousePosition,
+    ) -> Box<dyn GpuFuture>
+    where
+        F: GpuFuture + 'static,
+    {
+        let dims = final_image.image().dimensions().width_height();
+        let descriptor_set = PersistentDescriptorSet::new(
+            self.pipeline.layout().set_layouts()[0].clone(),
+            [WriteDescriptorSet::image_view(
+                0,
+                ImageView::new_default(final_image.image().clone()).unwrap(),
+            )],
+        )
+        .unwrap();
 
-        let mut mouse_pos = glm::Vec2::new(0., 0.);
-        let mut time_passed = 0.;
-        let dimensions = surface.window().inner_size();
-        let sb_offset = -1.;
+        let mut executor = RenderPassExecutor::new(
+            self.pipeline.clone(),
+            Some(descriptor_set.clone()),
+            self.queue.clone(),
+            self.render_pass.clone(),
+            final_image.clone(),
+        );
 
-        // TODO: add debug to game objects as well
-        let mut env_objects: Vec<Box<dyn EnvironmentObject>> = vec![
-            Box::new(AABB::new(
-                glm::Vec2::new(sb_offset, sb_offset),
-                glm::Vec2::new(
-                    dimensions.width as f32 - sb_offset,
-                    dimensions.height as f32 - sb_offset,
-                ),
-            )),
-            Box::new(Line::new(
-                glm::Vec2::new(200., 100.),
-                glm::Vec2::new(400., 100.),
-            )),
-            Box::new(Line::new(
-                glm::Vec2::new(100., 150.),
-                glm::Vec2::new(800., 150.),
-            )),
-        ];
-
-        let start_p = glm::Vec2::new(100., 300.);
-        let end_p = glm::Vec2::new(700., 400.);
-        let gap_amount = 30;
-
-        env_objects.push(Box::new(DottedLine::new(
-            start_p,
-            end_p,
-            gap_amount,
-        )));
-
-        let start_p = glm::Vec2::new(100., 400.);
-        let end_p = glm::Vec2::new(700., 500.);
-        env_objects.push(Box::new(DottedLine::new(
-            start_p,
-            end_p,
-            gap_amount,
-        )));
-
-        let mut lights = vec![
-            Light::new(glm::Vec3::new(0.2, 0.1, 0.7), mouse_pos.clone(), 300., 3.),
-        ];
-
-        let aol_delta = 5;
-        let mut amount_of_lights = 20;
-        let mut last_aol_up = SystemTime::now();
-        let mut last_aol_down = SystemTime::now();
-        let mut last_updated_lights = SystemTime::now();
-        let max_update_aol_millis = 150;
-        let max_update_lights_millis = 1500;
-        generate_random_lights(&mut lights, amount_of_lights);
-
-        let event_loop = std::mem::replace(&mut self.event_loop, None);
-        if let Some(el) = event_loop {
-            el.run(move |event, _, control_flow| match event {
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => {
-                    *control_flow = ControlFlow::Exit;
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::Resized(_),
-                    ..
-                } => {
-                    recreate_swapchain = true;
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::CursorMoved { position, .. },
-                    ..
-                } => {
-                    mouse_pos = glm::Vec2::new(position.x as f32, position.y as f32);
-                    (&mut lights[0]).set_center(mouse_pos);
-                }
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::R),
-                                    ..
-                                },
-                            ..
-                        },
-                    ..
-                } => {
-                    if last_updated_lights.elapsed().unwrap().as_millis() > max_update_lights_millis {
-                        generate_random_lights(&mut lights, amount_of_lights);
-                        last_updated_lights = SystemTime::now();
-                    }
-                }
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::Up),
-                                    ..
-                                },
-                            ..
-                        },
-                    ..
-                } => {
-                    if last_aol_up.elapsed().unwrap().as_millis() > max_update_aol_millis {
-                        amount_of_lights += aol_delta;
-                        println!("{}", amount_of_lights);
-                        last_aol_up = SystemTime::now();
-                    }
-                }
-                Event::WindowEvent {
-                    event:
-                        WindowEvent::KeyboardInput {
-                            input:
-                                KeyboardInput {
-                                    virtual_keycode: Some(VirtualKeyCode::Down),
-                                    ..
-                                },
-                            ..
-                        },
-                    ..
-                } => {
-                    if last_aol_down.elapsed().unwrap().as_millis() > max_update_aol_millis {
-                        amount_of_lights = max(0, amount_of_lights - aol_delta);
-                        println!("{}", amount_of_lights);
-                        last_aol_down = SystemTime::now();
-                    }
-                }
-                Event::RedrawEventsCleared => {
-                    let dimensions = surface.window().inner_size();
-                    if dimensions.width == 0 || dimensions.height == 0 {
-                        return;
-                    }
-                    previous_frame_end.as_mut().unwrap().cleanup_finished();
-                    if recreate_swapchain {
-                        let (new_swapchain, new_images) =
-                            match swapchain.recreate(SwapchainCreateInfo {
-                                image_extent: dimensions.into(),
-                                ..swapchain.create_info()
-                            }) {
-                                Ok(r) => r,
-                                Err(SwapchainCreationError::ImageExtentNotSupported { .. }) => {
-                                    return
-                                }
-                                Err(e) => panic!("Failed to recreate swapchain: {:?}", e),
-                            };
-
-                        swapchain = new_swapchain;
-                        (framebuffers, descriptor_sets) = window_size_dependent_setup(
-                            &new_images,
-                            render_pass.clone(),
-                            &pipeline,
-                            &mut viewport,
-                        );
-                        recreate_swapchain = false;
-                    }
-                    let (image_num, suboptimal, acquire_future) =
-                        match acquire_next_image(swapchain.clone(), None) {
-                            Ok(r) => r,
-                            Err(AcquireError::OutOfDate) => {
-                                recreate_swapchain = true;
-                                return;
-                            }
-                            Err(e) => panic!("Failed to acquire next image: {:?}", e),
-                        };
-
-                    if suboptimal {
-                        recreate_swapchain = true;
-                    }
-
-                    let mut builder = AutoCommandBufferBuilder::primary(
-                        device.clone(),
-                        queue.family(),
-                        CommandBufferUsage::OneTimeSubmit,
-                    )
-                    .unwrap();
-
-                    let fb_image = framebuffers[image_num].attachments()[0].image();
-                    let dim = surface.window().inner_size();
-                    let res = [dim.width as f32, dim.height as f32];
-
-                    builder
-                        .clear_color_image(ClearColorImageInfo::image(fb_image).clone())
-                        .unwrap();
-
-                    for light in lights.iter_mut() {
-                        let (vertices, indices) = create_vertices(&env_objects, light);
-
-                        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-                            device.clone(),
-                            BufferUsage::all(),
-                            false,
-                            vertices,
-                        )
-                        .unwrap();
-
-                        let index_buffer = CpuAccessibleBuffer::from_iter(
-                            device.clone(),
-                            BufferUsage::all(),
-                            false,
-                            indices,
-                        )
-                        .unwrap();
-
-                        let push_constants = PushConstants {
-                            mouse_pos: mouse_pos.into(),
-                            resolution: res,
-                            dimensions: [dimensions.width as f32, dimensions.height as f32],
-                            light_center: light.get_center().clone(),
-                            light_color: light.color.clone(),
-                            light_brightness: light.brightness,
-                            light_radius: light.get_radius(),
-                            time_passed,
-                        };
-
-                        builder
-                            .begin_render_pass(
-                                RenderPassBeginInfo {
-                                    clear_values: vec![None],
-                                    ..RenderPassBeginInfo::framebuffer(
-                                        framebuffers[image_num].clone(),
-                                    )
-                                },
-                                SubpassContents::Inline,
-                            )
-                            .unwrap()
-                            .set_viewport(0, [viewport.clone()])
-                            .bind_pipeline_graphics(pipeline.clone())
-                            .push_constants(pipeline.layout().clone(), 0, push_constants)
-                            .bind_descriptor_sets(
-                                PipelineBindPoint::Graphics,
-                                pipeline.layout().clone(),
-                                0,
-                                descriptor_sets[image_num].clone(),
-                            )
-                            .bind_vertex_buffers(0, vertex_buffer.clone())
-                            .bind_index_buffer(index_buffer.clone())
-                            .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
-                            .unwrap()
-                            .end_render_pass()
-                            .unwrap();
-                    }
-
-                    time_passed += 0.01;
-
-                    let command_buffer = builder.build().unwrap();
-
-                    let future = previous_frame_end
-                        .take()
-                        .unwrap()
-                        .join(acquire_future)
-                        .then_execute(queue.clone(), command_buffer)
-                        .unwrap()
-                        .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
-                        .then_signal_fence_and_flush();
-
-                    match future {
-                        Ok(future) => {
-                            previous_frame_end = Some(future.boxed());
-                        }
-                        Err(FlushError::OutOfDate) => {
-                            recreate_swapchain = true;
-                            previous_frame_end = Some(sync::now(device.clone()).boxed());
-                        }
-                        Err(e) => {
-                            println!("Failed to flush future: {:?}", e);
-                            previous_frame_end = Some(sync::now(device.clone()).boxed());
-                        }
-                    }
-                }
-                _ => (),
-            });
+        executor.clear_framebuffer_image();
+        for (render_object, position, light) in &light_query {
+            if let Some(vertex_buffer) = render_object.vertex_buffer.as_ref() {
+                executor.do_pass(
+                    vertex_buffer.clone(),
+                    render_object.index_buffer.as_ref().unwrap().clone(),
+                    Some(PushConstants {
+                        mouse_pos: mouse_position.position.clone(),
+                        resolution: [dims[0] as f32, dims[1] as f32],
+                        time_passed: 0.,
+                        light_brightness: light.brightness,
+                        light_radius: light.get_radius(),
+                        light_center: position.position.clone(),
+                        light_color: light.color,
+                    }),
+                );
+            }
         }
+        executor.execute(self.queue.clone(), before_future)
     }
-}
-
-// TODO: Draw a concave polygon more efficiently
-fn create_vertices(
-    env_objects: &Vec<Box<dyn EnvironmentObject>>,
-    light: &mut Light,
-) -> (Vec<Vertex>, Vec<u32>) {
-    let light_polygon = light.calculate_light_polygon(env_objects);
-    let light_vertices = light_polygon.iter().map(|p| Vertex {
-        position: [p.x, p.y],
-    });
-
-    let mut vertices = vec![Vertex {
-        position: [light.get_center().x, light.get_center().y],
-    }];
-    vertices.extend(light_vertices);
-    while vertices.len() < 3 {
-        vertices.push(Vertex { position: [0., 0.] });
-    }
-
-    let indices = calculate_indices_polygon(vertices.len() - 1);
-
-    (vertices, indices)
-}
-
-fn generate_random_lights(lights: &mut Vec<Light>, amount_of_lights: usize) {
-    if lights.len() > 1 {
-        lights.drain(1..);
-    }
-
-    let colors = vec![
-        glm::Vec3::new(0.85, 0.33, 0.04),
-        glm::Vec3::new(0.23, 0.85, 0.09),
-        glm::Vec3::new(0.85, 0.06, 0.2),
-        glm::Vec3::new(0.09, 0.7, 0.7),
-        glm::Vec3::new(0.85, 0.06, 0.06),
-    ];
-
-    let positions = vec![
-        glm::Vec2::new(101., 101.),
-        glm::Vec2::new(351., 101.),
-        glm::Vec2::new(701., 101.),
-        glm::Vec2::new(101., 351.),
-        glm::Vec2::new(351., 351.),
-        glm::Vec2::new(701., 351.),
-        glm::Vec2::new(101., 551.),
-        glm::Vec2::new(351., 551.),
-        glm::Vec2::new(701., 551.),
-    ];
-    
-    let mut rng = rand::thread_rng();
-    for i in 0..amount_of_lights {
-        let color_offset = glm::Vec3::new(
-            rng.gen_range(0.0..0.2) - 0.1,
-            rng.gen_range(0.0..0.2) - 0.1,
-            rng.gen_range(0.0..0.2) - 0.1,
-        );
-        lights.push(
-            Light::new(
-                colors[i % colors.len()] + color_offset,
-                glm::Vec2::new(rng.gen_range(31.0..771.0), rng.gen_range(31.0..571.0)),
-                rng.gen_range(100.0..200.0),
-                // 100.0,
-                rng.gen_range(0.2..0.8)
-            )
-        );
-    }
-}
-
-fn window_size_dependent_setup(
-    images: &[Arc<SwapchainImage<Window>>],
-    render_pass: Arc<RenderPass>,
-    pipeline: &Arc<GraphicsPipeline>,
-    viewport: &mut Viewport,
-) -> (
-    Vec<Arc<Framebuffer>>,
-    Arc<Vec<Arc<PersistentDescriptorSet>>>,
-) {
-    let dimensions = images[0].dimensions().width_height();
-    viewport.dimensions = [dimensions[0] as f32, dimensions[1] as f32];
-
-    let framebuffers = images
-        .iter()
-        .map(|image| {
-            let view = ImageView::new_default(image.clone()).unwrap();
-            Framebuffer::new(
-                render_pass.clone(),
-                FramebufferCreateInfo {
-                    attachments: vec![view],
-                    ..Default::default()
-                },
-            )
-            .unwrap()
-        })
-        .collect::<Vec<_>>();
-
-    // As there are multiple swapchain images, we need to create one descriptor set for each and
-    // select the corrent one for the frame when drawing it to it. The descriptor set tells the
-    // fragment shader which image to use as the input attachment.
-    let descriptor_sets = images
-        .iter()
-        .map(|image| {
-            PersistentDescriptorSet::new(
-                pipeline.layout().set_layouts()[0].clone(),
-                [WriteDescriptorSet::image_view(
-                    0,
-                    ImageView::new_default(image.clone()).unwrap(),
-                )],
-            )
-            .unwrap()
-        })
-        .collect();
-
-    (framebuffers, Arc::new(descriptor_sets))
 }

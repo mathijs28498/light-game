@@ -10,135 +10,198 @@
 #![allow(unreachable_code)]
 
 use bevy::{
-    app::AppExit,
+    app::{AppExit, PluginGroupBuilder},
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
-    input::mouse::MouseMotion,
+    input::{
+        mouse::{MouseButtonInput, MouseMotion, MouseWheel},
+        ButtonState,
+    },
     prelude::*,
-    window::WindowResizeConstraints,
+    window::{close_on_esc, CursorMoved, PresentMode, WindowMode, WindowResizeConstraints},
 };
-use bevy_pixels::prelude::*;
+use game_object::game_object::*;
+
+use game_object::help_functions::calculate_indices_polygon;
 use nalgebra::*;
 use rand::prelude::*;
+use rand::Rng;
+
+use bevy_vulkano::BevyVulkanoWindows;
 
 mod vulkano_backend;
-use vulkano::pipeline::compute;
+use vulkano::{device::Features, pipeline::compute};
 use vulkano_backend::{
     compute_device::{self}, //ComputeDevice, PushConstants, BUFFER_SIZE, HEIGHT, WIDTH,},
-    vulkano_device::{self, VulkanoDevice},
-    test_multi_render_passes::multi_main
+    test_multi_render_passes::multi_main,
+    vulkano_device::{self, RenderObject, SimpleVertex, VulkanoDevice},
 };
+use vulkano_util::{context::VulkanoConfig, window::VulkanoWindows};
+
+mod bevy_render_plugin;
+use bevy_render_plugin::main_render_plugin::MainRenderPlugin;
+
+use nalgebra_glm as glm;
 
 mod game_object;
 
-use rand::Rng;
+mod physics;
+use physics::general_physics::*;
+
 use std::sync::Arc;
 
-// #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
-// enum AppStage {
-//     DrawBackground,
-//     DrawObjects,
-// }
+use bevy_vulkano::{VulkanoWinitConfig, VulkanoWinitPlugin};
 
-struct MousePos {
-    pos: [f32; 2],
+#[derive(Component)]
+pub struct MousePosition {
+    pub position: glm::Vec2,
+}
+
+struct PluginBundle;
+
+impl PluginGroup for PluginBundle {
+    fn build(&mut self, group: &mut PluginGroupBuilder) {
+        // Minimum plugins for the demo
+        group.add(bevy::log::LogPlugin);
+        group.add(bevy::core::CorePlugin);
+        group.add(bevy::time::TimePlugin);
+        group.add(bevy::diagnostic::DiagnosticsPlugin);
+        group.add(bevy::diagnostic::FrameTimeDiagnosticsPlugin);
+        group.add(bevy::input::InputPlugin);
+        // Don't add default bevy plugins or WinitPlugin. This owns "core loop" (runner).
+        // Bevy winit and render should be excluded
+        group.add(VulkanoWinitPlugin);
+        // See `MainRenderPlugin` how rendering is orchestrated
+        group.add(MainRenderPlugin);
+        group.add(PhysicsPlugin);
+    }
 }
 
 fn main() {
-    let mut v_device = VulkanoDevice::new_with_initialization();
-    v_device.run();
+    App::new()
+        // Vulkano configs (Modify this if you want to add features to vulkano (vulkan backend).
+        // You can also disable primary window opening here
+        .insert_non_send_resource(VulkanoWinitConfig {
+            vulkano_config: VulkanoConfig {
+                device_features: Features {
+                    fill_mode_non_solid: true,
+                    ..Features::none()
+                },
+                ..VulkanoConfig::default()
+            },
+            ..VulkanoWinitConfig::default()
+        })
+        .insert_resource(MousePosition {
+            position: glm::Vec2::new(0., 0.),
+        })
+        // Window configs for primary window
+        .insert_resource(WindowDescriptor {
+            width: 1280.,
+            height: 720.,
+            title: "Bevy Vulkano".to_string(),
+            present_mode: PresentMode::Immediate,
+            resizable: false,
+            mode: WindowMode::Windowed,
+            ..WindowDescriptor::default()
+        })
+        .add_plugins(PluginBundle)
+        .add_system(close_on_esc)
+        .add_system(update_light_polygons_system)
+        .add_system(mouse_event_system)
+        .add_system(mouse_event_system2)
+        .run();
 }
 
-// fn start_app() {
-//     App::new()
-//     .insert_resource(WindowDescriptor {
-//         title: "Hello Bevy Pixels".to_string(),
-//         width: WIDTH as f32,
-//         height: HEIGHT as f32,
-//         resize_constraints: WindowResizeConstraints {
-//             min_width: WIDTH as f32,
-//             min_height: HEIGHT as f32,
-//             ..Default::default()
-//         },
-//         ..Default::default()
-//     })
-//     .insert_resource(compute_device::ComputeDevice::new())
-//     .insert_resource(MousePos { pos: [0.; 2] })
-//     // .insert_resource(GameObjects {
-//     //     balls: vec![
-//     //         Ball::new(Vector3::new(200., 200., 10.), 50., [255, 0, 0, 255]),
-//     //         Ball::new(Vector3::new(150., 150., 5.), 50., [0, 255, 0, 255]),
-//     //     ],
-//     // })
-//     .insert_resource(PixelsOptions {
-//         width: WIDTH,
-//         height: HEIGHT,
-//     })
-//     .add_startup_system(init_compute_device)
-//     .add_plugins(DefaultPlugins)
-//     .add_plugin(PixelsPlugin)
-//     .add_plugin(FrameTimeDiagnosticsPlugin::default())
-//     .add_plugin(LogDiagnosticsPlugin::default())
-//     .add_system(exit_on_escape)
-//     .add_system(get_mouse_pos)
-//     // .add_stage_after(
-//     //     PixelsStage::Draw,
-//     //     AppStage::DrawBackground,
-//     //     SystemStage::parallel(),
-//     // )
-//     // .add_stage_after(
-//     //     AppStage::DrawBackground,
-//     //     AppStage::DrawObjects,
-//     //     SystemStage::parallel(),
-//     // )
-//     .add_system(draw_objects)
-//     // .add_system_to_stage(AppStage::DrawBackground, draw_background_system)
-//     // .add_system_to_stage(AppStage::DrawObjects, draw_objects_system)
-//     .run();
-// }
+fn update_light_polygons_system(
+    mut light_query: Query<(&mut RenderObject<SimpleVertex>, &Position, &mut Light)>,
+    env_object_query: Query<&AABB, With<EnvironmentObjectComp>>,
+) {
+    for (mut render_object, position, mut light) in &mut light_query.iter_mut() {
+        let light_polygon = light.calculate_light_polygon(&position, &env_object_query);
+        let light_vertices = light_polygon.iter().map(|p| SimpleVertex {
+            position: [p.x, p.y],
+        });
 
-// fn get_mouse_pos(windows: Res<Windows>, mut mouse_pos: ResMut<MousePos>) {
-//     let window = windows.get_primary().unwrap();
+        let mut vertices = vec![SimpleVertex {
+            position: [position.position.x, position.position.y],
+        }];
+        vertices.extend(light_vertices);
+        while vertices.len() < 3 {
+            vertices.push(SimpleVertex { position: [0., 0.] });
+        }
 
-//     if let Some(mouse_pos_) = window.cursor_position() {
-//         mouse_pos.pos = [mouse_pos_.x, HEIGHT as f32 - mouse_pos_.y]
-//     }
-// }
+        render_object.update_vertex_buffer(vertices);
 
-// fn exit_on_escape(keyboard_input: Res<Input<KeyCode>>, mut app_exit_events: EventWriter<AppExit>) {
-//     if keyboard_input.just_pressed(KeyCode::Escape) {
-//         app_exit_events.send(AppExit);
-//     }
-// }
+        // let indices = calculate_indices_polygon(vertices.len() - 1);
+    }
+}
 
-// fn init_compute_device(mut compute_device: ResMut<ComputeDevice>) {
-//     compute_device.init();
-//     compute_device.create_buffers();
-//     compute_device.create_pipeline();
-// }
+// TODO: Make system on startup for renderobject that gets its queue
+fn mouse_event_system2(
+    mut commands: Commands,
+    mut mouse_button_input_events: EventReader<MouseButtonInput>,
+    mouse_position: Res<MousePosition>,
+    player_query: Query<(&Position, &Light), With<PlayerLight>>,
+    vulkano_windows: NonSend<BevyVulkanoWindows>,
+) {
+    let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
+    let queue = window_renderer.graphics_queue();
+    let mp = mouse_position.as_ref();
 
-// fn draw_objects(
-//     mut pixels_resource: ResMut<PixelsResource>,
-//     mut compute_device: ResMut<ComputeDevice>,
-//     // game_objects: Res<GameObjects>,
-//     mouse_pos: Res<MousePos>,
-// ) {
-//     let frame: &mut [u8] = pixels_resource.pixels.get_frame();
-//     compute_device.execute(PushConstants::new(
-//         0.,
-//         WIDTH,
-//         HEIGHT,
-//         mouse_pos.pos[0],
-//         mouse_pos.pos[1],
-//     ));
-//     compute_device.await_future();
-//     compute_device.fill_u8(frame).unwrap();
-//     // *frame = frame_buffer.clone().try_into();
-//     // for (i, pix) in frame_buffer.iter().enumerate() {
-//     //     frame[i] = *pix;
-//     // }
-// }
+    let colors = vec![
+        glm::Vec3::new(0.85, 0.33, 0.04),
+        glm::Vec3::new(0.23, 0.85, 0.09),
+        glm::Vec3::new(0.85, 0.06, 0.2),
+        glm::Vec3::new(0.09, 0.7, 0.7),
+        glm::Vec3::new(0.85, 0.06, 0.06),
+    ];
+    let mut rng = rand::thread_rng();
 
-// fn get_sq_dist(v0: &Vector3<f32>, v1: &Vector3<f32>) -> f32 {
-//     let x = v0 - v1;
-//     return x.x.powi(2) + x.y.powi(2) + x.z.powi(2);
-// }
+    for event in mouse_button_input_events.iter() {
+        if event.state == ButtonState::Pressed && event.button == MouseButton::Left {
+            let (player_pos, light) = player_query.single();
+            let dir = (mp.position - player_pos.position).normalize();
+            let light_pos = player_pos.position + dir * 50.;
+
+            commands
+                .spawn()
+                .insert(Position {
+                    position: light_pos.clone(),
+                })
+                .insert(EnvironmentObjectComp)
+                .insert(Light::new(
+                    colors[rng.gen_range(0..5)]
+                        + glm::Vec3::new(
+                            rng.gen_range(0.0..0.2) - 0.1,
+                            rng.gen_range(0.0..0.2) - 0.1,
+                            rng.gen_range(0.0..0.2) - 0.1,
+                        ),
+                    100.,
+                    3.,
+                ))
+                .insert(RenderObject::<SimpleVertex>::new(queue.clone()))
+                .insert(Velocity {
+                    velocity: dir * 350.,
+                });
+        }
+    }
+}
+// TODO: Make sure the mouse position is correct after resizing
+fn mouse_event_system(
+    mut commands: Commands,
+    mut cursor_moved_events: EventReader<CursorMoved>,
+    mut mouse_button_input_events: EventReader<MouseButtonInput>,
+    mut mouse_position: ResMut<MousePosition>,
+    mut mouse_light_query: Query<(&MouseLight, &mut Position, &mut Light)>,
+    // player_query: Query<&Position, With<PlayerLight>>,
+) {
+    let mp = mouse_position.as_mut();
+    for event in cursor_moved_events.iter() {
+        mp.position.x = event.position.x;
+        mp.position.y = 720. - event.position.y;
+
+        for (mouse_light, mut position, mut light) in &mut mouse_light_query.iter_mut() {
+            position.position = mp.position.clone();
+            light.polygon = None;
+        }
+    }
+}
