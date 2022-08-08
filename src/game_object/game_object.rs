@@ -14,8 +14,8 @@ pub trait EnvironmentObject {
 
 #[derive(Debug)]
 pub struct Collision {
-    t: f32,
-    collision_points: Vec<glm::Vec2>,
+    pub t: f32,
+    pub collision_points: Vec<glm::Vec2>,
 }
 
 impl Collision {
@@ -29,10 +29,10 @@ impl Collision {
 
 #[derive(Debug)]
 pub struct Ray {
-    orig: glm::Vec2,
-    dir: glm::Vec2,
-    inv_dir: glm::Vec2,
-    t: f32,
+    pub orig: glm::Vec2,
+    pub dir: glm::Vec2,
+    pub inv_dir: glm::Vec2,
+    pub t: f32,
 }
 
 impl Ray {
@@ -235,23 +235,34 @@ impl EnvironmentObject for DottedLine {
 }
 
 #[derive(Component)]
+pub struct Position {
+    pub position: glm::Vec2,
+}
+
+#[derive(Component)]
+pub struct Velocity {
+    pub velocity: glm::Vec2,
+}
+
+#[derive(Component)]
 pub struct MouseLight;
+
+#[derive(Component)]
+pub struct PlayerLight;
 
 #[derive(Component)]
 pub struct Light {
     pub color: glm::Vec3,
-    center: glm::Vec2,
     radius: f32,
     max_radius: f32,
     pub brightness: f32,
-    polygon: Option<Vec<glm::Vec2>>,
+    pub polygon: Option<Vec<glm::Vec2>>,
 }
 
 impl Light {
-    pub fn new(color: glm::Vec3, center: glm::Vec2, radius: f32, brightness: f32) -> Self {
+    pub fn new(color: glm::Vec3, radius: f32, brightness: f32) -> Self {
         Light {
             color,
-            center,
             radius,
             max_radius: radius,
             brightness,
@@ -268,21 +279,11 @@ impl Light {
     ) -> Self {
         Light {
             color,
-            center,
             radius,
             max_radius,
             brightness,
             polygon: None,
         }
-    }
-
-    pub fn get_center<'a>(&'a self) -> &'a glm::Vec2 {
-        return &self.center;
-    }
-
-    pub fn set_center(&mut self, center: glm::Vec2) {
-        self.center = center;
-        self.polygon = None;
     }
 
     pub fn get_radius(&self) -> f32 {
@@ -302,22 +303,10 @@ impl Light {
         self.polygon = None;
     }
 
-    pub fn get_buffer_data(&self) -> [f32; 8] {
-        [
-            self.center.x,
-            self.center.y,
-            self.radius,
-            self.brightness,
-            self.color.x,
-            self.color.y,
-            self.color.z,
-            0.,
-        ]
-    }
-
     // TODO: Add optimizations back in
     pub fn calculate_light_polygon(
         &mut self,
+        position: &Position,
         env_object_query: &Query<&AABB, With<EnvironmentObjectComp>>,
     ) -> Vec<glm::Vec2> {
         if let Some(polygon) = &self.polygon {
@@ -330,7 +319,7 @@ impl Light {
         for go in env_object_query {
             // let mut ray_env_object = None;
             for p in go.get_corners() {
-                let p_ray = Ray::new_between_points(self.center.clone(), &p, None);
+                let p_ray = Ray::new_between_points(position.position.clone(), &p, None);
                 let mut add_point = true;
                 for go_ in env_object_query {
                     if let Some(coll) = go_.ray_collision(&p_ray, false) {
@@ -382,7 +371,7 @@ impl Light {
         }
         // }
 
-        let polygon = calculate_clockwise_points(actual_points, self.center);
+        let polygon = calculate_clockwise_points(actual_points, position.position);
         let polygon_c = polygon.clone();
         self.polygon = Some(polygon);
 

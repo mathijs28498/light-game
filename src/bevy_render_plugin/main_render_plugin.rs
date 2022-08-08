@@ -9,7 +9,7 @@ use bevy_vulkano::{BevyVulkanoWindows, PipelineSyncData};
 use vulkano::{image::ImageAccess, sync::GpuFuture};
 
 use crate::{
-    game_object::game_object::{EnvironmentObjectComp, Light, MouseLight, AABB},
+    game_object::game_object::*,
     vulkano_backend::vulkano_device::{RenderObject, SimpleVertex, VertexTest, VulkanoDevice},
     MousePosition,
 };
@@ -85,17 +85,18 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
 
     commands
         .spawn()
-        .insert(Light::new(
-            glm::Vec3::new(0.1, 0.45, 0.7),
-            glm::Vec2::new(0., 0.),
-            200.,
-            3.,
-        ))
+        .insert(Position {
+            position: glm::Vec2::new(200., 450.),
+        })
+        .insert(Velocity {
+            velocity: glm::Vec2::new(0., 0.),
+        })
+        .insert(Light::new(glm::Vec3::new(0.1, 0.45, 0.7), 150., 1.5))
         .insert(render_object)
-        .insert(MouseLight);
+        .insert(PlayerLight);
 
-    generate_random_lights(&mut commands, &queue, 40);
-    generate_random_aabbs(&mut commands, 50);
+    // generate_random_lights(&mut commands, &queue, 30);
+    // generate_random_aabbs(&mut commands, 50);
 
     let bounding_box = AABB::new(glm::Vec2::new(0., 0.), glm::Vec2::new(1280., 720.));
     commands
@@ -103,8 +104,105 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
         .insert(bounding_box)
         .insert(EnvironmentObjectComp);
 
+    let bounding_box = AABB::new(glm::Vec2::new(100., 500.), glm::Vec2::new(300., 501.));
+    commands
+        .spawn()
+        .insert(bounding_box)
+        .insert(EnvironmentObjectComp);
+
+    let bounding_box = AABB::new(glm::Vec2::new(450., 600.), glm::Vec2::new(600., 601.));
+    commands
+        .spawn()
+        .insert(bounding_box)
+        .insert(EnvironmentObjectComp);
+
     let vulkano_device = VulkanoDevice::new::<SimpleVertex>(queue, format);
     commands.insert_resource(vulkano_device);
+}
+
+fn pre_render_setup_system(
+    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    mut pipeline_frame_data: ResMut<PipelineSyncData>,
+) {
+    for (window_id, mut frame_data) in pipeline_frame_data.data_per_window.iter_mut() {
+        let window_renderer =
+            if let Some(window_renderer) = vulkano_windows.get_window_renderer_mut(*window_id) {
+                window_renderer
+            } else {
+                return;
+            };
+        let before = match window_renderer.acquire() {
+            Err(e) => {
+                bevy::log::error!("Failed to start frame: {}", e);
+                None
+            }
+            Ok(f) => Some(f),
+        };
+        frame_data.before = before;
+    }
+}
+
+fn post_render_system(
+    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    mut pipeline_frame_data: ResMut<PipelineSyncData>,
+) {
+    for (window_id, frame_data) in pipeline_frame_data.data_per_window.iter_mut() {
+        let window_renderer =
+            if let Some(window_renderer) = vulkano_windows.get_window_renderer_mut(*window_id) {
+                window_renderer
+            } else {
+                return;
+            };
+        if let Some(after) = frame_data.after.take() {
+            window_renderer.present(after, false);
+        }
+    }
+}
+
+pub fn main_render_system(
+    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    diagnostics: Res<Diagnostics>,
+    mut pipeline_frame_data: ResMut<PipelineSyncData>,
+    mut vulkano_device: ResMut<VulkanoDevice>,
+    light_query: Query<(&RenderObject<SimpleVertex>, &Position, &Light)>,
+    env_object_query: Query<(&EnvironmentObjectComp, &AABB)>,
+    mouse_position: Res<MousePosition>,
+) {
+    if let Some(diag) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
+        if let Some(avg) = diag.average() {
+            let primary = vulkano_windows
+                .get_winit_window(WindowId::primary())
+                .unwrap();
+            primary.set_title(&format!(
+                "Bevy Vulkano Game Of Life {:.2} fps ({:.2} ms/frame)",
+                avg,
+                1. / avg * 1000.
+            ));
+        }
+    }
+
+    let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
+    let window_renderer =
+        if let Some(window_renderer) = vulkano_windows.get_primary_window_renderer_mut() {
+            window_renderer
+        } else {
+            return;
+        };
+
+    // We take the before pipeline future leaving None in its place
+    if let Some(before_future) = frame_data.before.take() {
+        let final_image_view = window_renderer.swapchain_image_view();
+        let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
+            before_future,
+            window_renderer.swapchain_image_view(),
+            light_query,
+            &mouse_position,
+        );
+
+        let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();
+        // Update after pipeline future (so post render will know to present frame)
+        frame_data.after = Some(after_drawing);
+    }
 }
 
 fn generate_random_aabbs(commands: &mut Commands, amount_of_aabbs: usize) {
@@ -159,96 +257,16 @@ fn generate_random_lights(commands: &mut Commands, queue: &Arc<Queue>, amount_of
         );
         let light = Light::new(
             colors[i % colors.len()] + color_offset,
-            glm::Vec2::new(rng.gen_range(30.0..1250.0), rng.gen_range(30.0..690.0)),
             rng.gen_range(100.0..300.0),
-            // 100.0,
             rng.gen_range(0.2..0.8),
         );
         let render_object = RenderObject::<SimpleVertex>::new(queue.clone());
-        commands.spawn().insert(light).insert(render_object);
-    }
-}
-
-fn pre_render_setup_system(
-    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    mut pipeline_frame_data: ResMut<PipelineSyncData>,
-) {
-    for (window_id, mut frame_data) in pipeline_frame_data.data_per_window.iter_mut() {
-        let window_renderer =
-            if let Some(window_renderer) = vulkano_windows.get_window_renderer_mut(*window_id) {
-                window_renderer
-            } else {
-                return;
-            };
-        let before = match window_renderer.acquire() {
-            Err(e) => {
-                bevy::log::error!("Failed to start frame: {}", e);
-                None
-            }
-            Ok(f) => Some(f),
-        };
-        frame_data.before = before;
-    }
-}
-
-fn post_render_system(
-    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    mut pipeline_frame_data: ResMut<PipelineSyncData>,
-) {
-    for (window_id, frame_data) in pipeline_frame_data.data_per_window.iter_mut() {
-        let window_renderer =
-            if let Some(window_renderer) = vulkano_windows.get_window_renderer_mut(*window_id) {
-                window_renderer
-            } else {
-                return;
-            };
-        if let Some(after) = frame_data.after.take() {
-            window_renderer.present(after, false);
-        }
-    }
-}
-
-pub fn main_render_system(
-    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    diagnostics: Res<Diagnostics>,
-    mut pipeline_frame_data: ResMut<PipelineSyncData>,
-    mut vulkano_device: ResMut<VulkanoDevice>,
-    light_query: Query<(&RenderObject<SimpleVertex>, &Light)>,
-    env_object_query: Query<(&EnvironmentObjectComp, &AABB)>,
-    mouse_position: Res<MousePosition>,
-) {
-    if let Some(diag) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
-        if let Some(avg) = diag.average() {
-            let primary = vulkano_windows
-                .get_winit_window(WindowId::primary())
-                .unwrap();
-            primary.set_title(&format!(
-                "Bevy Vulkano Game Of Life {:.2} fps ({:.2} ms/frame)",
-                avg,
-                1. / avg * 1000.
-            ));
-        }
-    }
-    let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
-    let window_renderer =
-        if let Some(window_renderer) = vulkano_windows.get_primary_window_renderer_mut() {
-            window_renderer
-        } else {
-            return;
-        };
-
-    // We take the before pipeline future leaving None in its place
-    if let Some(before_future) = frame_data.before.take() {
-        let final_image_view = window_renderer.swapchain_image_view();
-        let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
-            before_future,
-            window_renderer.swapchain_image_view(),
-            light_query,
-            &mouse_position,
-        );
-
-        let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();
-        // Update after pipeline future (so post render will know to present frame)
-        frame_data.after = Some(after_drawing);
+        commands
+            .spawn()
+            .insert(light)
+            .insert(render_object)
+            .insert(Position {
+                position: glm::Vec2::new(rng.gen_range(30.0..1250.0), rng.gen_range(30.0..690.0)),
+            });
     }
 }
