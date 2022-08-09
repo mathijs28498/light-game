@@ -116,7 +116,10 @@ fn update_light_polygons_system(
     env_object_query: Query<&AABB, With<EnvironmentObjectComp>>,
 ) {
     for (mut render_object, position, mut light) in &mut light_query.iter_mut() {
-        let light_polygon = light.calculate_light_polygon(&position, &env_object_query);
+        let (light_polygon, recalculate) = light.calculate_light_polygon(&position, &env_object_query);
+        if !recalculate {
+            continue;
+        }
         let light_vertices = light_polygon.iter().map(|p| SimpleVertex {
             position: [p.x, p.y],
         });
@@ -181,6 +184,8 @@ fn mouse_event_system2(
                 .insert(RenderObject::<SimpleVertex>::new(queue.clone()))
                 .insert(Velocity {
                     velocity: dir * 350.,
+                    wanted_velocity: dir * 350.,
+                    jump_pressed: false,
                 });
         }
     }

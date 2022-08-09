@@ -8,10 +8,12 @@ use std::{
     time::{Duration, SystemTime},
 };
 use vulkano::{
-    buffer::{BufferContents, BufferUsage, CpuAccessibleBuffer, TypedBufferAccess},
+    buffer::{
+        BufferContents, BufferUsage, ImmutableBuffer, TypedBufferAccess,
+    },
     command_buffer::{
         AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage,
-        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents,
+        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents, CommandBufferExecFuture
     },
     descriptor_set::{DescriptorSet, PersistentDescriptorSet, WriteDescriptorSet},
     device::{
@@ -41,7 +43,7 @@ use vulkano::{
         acquire_next_image, AcquireError, Surface, Swapchain, SwapchainCreateInfo,
         SwapchainCreationError,
     },
-    sync::{self, FlushError, GpuFuture},
+    sync::{self, FlushError, GpuFuture, NowFuture},
 };
 use vulkano_win::VkSurfaceBuild;
 use winit::{
@@ -52,7 +54,7 @@ use winit::{
 
 use crate::{
     game_object::{
-        game_object::{DottedLine, EnvironmentObject, Light, Line, AABB, Position},
+        game_object::{DottedLine, EnvironmentObject, Light, Line, Position, AABB},
         help_functions::{calculate_indices_polygon, get_all_points},
     },
     MousePosition,
@@ -94,8 +96,8 @@ where
     T: Zeroable + Pod,
     [T]: BufferContents,
 {
-    vertex_buffer: Option<Arc<CpuAccessibleBuffer<[T]>>>,
-    index_buffer: Option<Arc<CpuAccessibleBuffer<[u32]>>>,
+    vertex_buffer: Option<Arc<ImmutableBuffer<[T]>>>,
+    index_buffer: Option<Arc<ImmutableBuffer<[u32]>>>,
     queue: Arc<Queue>,
 }
 
@@ -105,16 +107,6 @@ where
     [T]: BufferContents,
 {
     pub fn new(queue: Arc<Queue>) -> Self {
-        // let index_buffer = calculate_index_buffer_polygon(&queue, vertices.len());
-
-        // let vertex_buffer = CpuAccessibleBuffer::from_iter(
-        //     queue.device().clone(),
-        //     BufferUsage::vertex_buffer(),
-        //     false,
-        //     vertices,
-        // )
-        // .unwrap();
-
         Self {
             vertex_buffer: None,
             index_buffer: None,
@@ -123,15 +115,17 @@ where
     }
 
     pub fn update_vertex_buffer(&mut self, vertices: Vec<T>) {
-        let index_buffer = calculate_index_buffer_polygon(&self.queue, vertices.len());
+        let (index_buffer, ib_future)= calculate_index_buffer_polygon(&self.queue, vertices.len());
 
-        let vertex_buffer = CpuAccessibleBuffer::from_iter(
-            self.queue.device().clone(),
-            BufferUsage::vertex_buffer(),
-            false,
+
+        let (vertex_buffer, vb_future) = ImmutableBuffer::from_iter(
             vertices,
-        )
-        .unwrap();
+            BufferUsage::vertex_buffer(),
+            self.queue.clone(),
+        ).unwrap();
+
+        // vb_future.
+        // TODO: Await futures!!
 
         self.vertex_buffer = Some(vertex_buffer);
         self.index_buffer = Some(index_buffer);
@@ -141,13 +135,12 @@ where
 pub fn calculate_index_buffer_polygon(
     queue: &Arc<Queue>,
     amount_of_vertices: usize,
-) -> Arc<CpuAccessibleBuffer<[u32]>> {
+) -> (Arc<ImmutableBuffer<[u32]>>, CommandBufferExecFuture<NowFuture, PrimaryAutoCommandBuffer>) {
     let indices = calculate_indices_polygon(amount_of_vertices - 1);
-    CpuAccessibleBuffer::from_iter(
-        queue.device().clone(),
-        BufferUsage::index_buffer(),
-        false,
+    ImmutableBuffer::from_iter(
         indices,
+        BufferUsage::index_buffer(),
+        queue.clone(),
     )
     .unwrap()
 }
@@ -212,8 +205,8 @@ impl RenderPassExecutor {
     // TODO: Make PushConstants generic
     pub fn do_pass<T>(
         &mut self,
-        vertex_buffer: Arc<CpuAccessibleBuffer<[T]>>,
-        index_buffer: Arc<CpuAccessibleBuffer<[u32]>>,
+        vertex_buffer: Arc<ImmutableBuffer<[T]>>,
+        index_buffer: Arc<ImmutableBuffer<[u32]>>,
         push_constants: Option<PushConstants>,
     ) where
         T: Zeroable + Pod,
@@ -381,7 +374,7 @@ impl VulkanoDevice {
             queue,
             render_pass,
             pipeline,
-            descriptor_sets: Vec::new()
+            descriptor_sets: Vec::new(),
         }
     }
 

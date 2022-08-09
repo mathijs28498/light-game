@@ -90,30 +90,71 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
         })
         .insert(Velocity {
             velocity: glm::Vec2::new(0., 0.),
+            wanted_velocity: glm::Vec2::new(0., 0.),
+            jump_pressed: false,
         })
-        .insert(Light::new(glm::Vec3::new(0.1, 0.45, 0.7), 150., 1.5))
-        .insert(render_object)
-        .insert(PlayerLight);
+        .insert(Light::new(glm::Vec3::new(0.1, 0.45, 0.7), 70., 1.5))
+        .insert(PlayerLight)
+        .insert(render_object);
 
-    // generate_random_lights(&mut commands, &queue, 30);
-    // generate_random_aabbs(&mut commands, 50);
+    generate_random_lights(&mut commands, &queue, 40);
+    generate_random_aabbs(&mut commands, 0);
 
-    let bounding_box = AABB::new(glm::Vec2::new(0., 0.), glm::Vec2::new(1280., 720.));
+    let bb_offset = 500.;
     commands
         .spawn()
-        .insert(bounding_box)
+        .insert(AABB::new(
+            glm::Vec2::new(0. - bb_offset, 0. - bb_offset),
+            glm::Vec2::new(1280. + bb_offset, 720. + bb_offset),
+        ))
         .insert(EnvironmentObjectComp);
 
-    let bounding_box = AABB::new(glm::Vec2::new(100., 500.), glm::Vec2::new(300., 501.));
     commands
         .spawn()
-        .insert(bounding_box)
+        .insert(AABB::new(
+            glm::Vec2::new(100., 530.),
+            glm::Vec2::new(300., 550.),
+        ))
         .insert(EnvironmentObjectComp);
 
-    let bounding_box = AABB::new(glm::Vec2::new(450., 600.), glm::Vec2::new(600., 601.));
     commands
         .spawn()
-        .insert(bounding_box)
+        .insert(AABB::new(
+            glm::Vec2::new(100., 320.),
+            glm::Vec2::new(300., 330.),
+        ))
+        .insert(EnvironmentObjectComp);
+
+    commands
+        .spawn()
+        .insert(AABB::new(
+            glm::Vec2::new(750., 600.),
+            glm::Vec2::new(900., 640.),
+        ))
+        .insert(EnvironmentObjectComp);
+
+    commands
+        .spawn()
+        .insert(AABB::new(
+            glm::Vec2::new(850., 460.),
+            glm::Vec2::new(900., 450.),
+        ))
+        .insert(EnvironmentObjectComp);
+
+    commands
+        .spawn()
+        .insert(AABB::new(
+            glm::Vec2::new(850., 300.),
+            glm::Vec2::new(900., 310.),
+        ))
+        .insert(EnvironmentObjectComp);
+
+    commands
+        .spawn()
+        .insert(AABB::new(
+            glm::Vec2::new(850., 135.),
+            glm::Vec2::new(900., 165.),
+        ))
         .insert(EnvironmentObjectComp);
 
     let vulkano_device = VulkanoDevice::new::<SimpleVertex>(queue, format);

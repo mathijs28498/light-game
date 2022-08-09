@@ -43,9 +43,11 @@ fn player_input_system(
     aabb_query: Query<&AABB, With<EnvironmentObjectComp>>,
     keyboard_input: Res<Input<KeyCode>>,
 ) {
+    // return;
     let speed_mult = 300.;
     let (mut velocity, mut position) = player_query.single_mut();
-    let mut velocity_vec = glm::Vec2::new(0., 0.01);
+    let mut velocity_vec = glm::Vec2::new(0., 0.);
+    velocity_vec += glm::Vec2::new(0., 0.05);
 
     let ray = Ray::new(position.position.clone(), velocity_vec.normalize(), 50.);
     let mut grounded = false;
@@ -61,22 +63,20 @@ fn player_input_system(
         }
     }
 
-    if keyboard_input.just_pressed(KeyCode::A) {
-        velocity_vec -= glm::Vec2::new(1., 0.);
-    } else if keyboard_input.just_released(KeyCode::A) {
-        velocity_vec += glm::Vec2::new(1., 0.);
-    }
-
-    if keyboard_input.just_pressed(KeyCode::D) {
-        velocity_vec += glm::Vec2::new(1., 0.);
-    } else if keyboard_input.just_released(KeyCode::D) {
+    if keyboard_input.pressed(KeyCode::A) {
         velocity_vec -= glm::Vec2::new(1., 0.);
     }
-
+    if keyboard_input.pressed(KeyCode::D) {
+        velocity_vec += glm::Vec2::new(1., 0.);
+    } 
+    if keyboard_input.pressed(KeyCode::R) {
+        position.position = glm::Vec2::new(200., 450.);
+        velocity.velocity = glm::Vec2::new(0., 0.);
+    } 
     if keyboard_input.just_pressed(KeyCode::Space) {
         if grounded {
             velocity.velocity.y = 0.;
-            velocity_vec -= glm::Vec2::new(0., 1.);
+            velocity.jump_pressed = true
         }
     }
 
@@ -86,14 +86,22 @@ fn player_input_system(
     //     velocity_vec += glm::Vec2::new(1., 0.);
     // }
 
-    velocity.velocity += velocity_vec * speed_mult;
+    // println!("{:?}", velocity_vec);
+
+    velocity.wanted_velocity = velocity_vec * speed_mult + glm::Vec2::new(0., velocity.velocity.y);
 }
 
-fn solve_position(mut last_time: Local<f64>, time: Res<Time>, mut velocity_position_query: Query<(&Velocity, &mut Position, &mut Light)>) {
+fn solve_position(mut last_time: Local<f64>, time: Res<Time>, mut velocity_position_query: Query<(&mut Velocity, &mut Position, &mut Light)>) {
     let fixed_delta_time = time.seconds_since_startup() - *last_time;
-    for (velocity, mut position, mut light) in velocity_position_query.iter_mut() {
-        if velocity.velocity.magnitude_squared() > 0.001 * 0.001 {
+    for (mut velocity, mut position, mut light) in velocity_position_query.iter_mut() {
+        if velocity.jump_pressed || velocity.wanted_velocity.magnitude_squared() > 0.001 * 0.001 || velocity.velocity.magnitude_squared() > 0.001 * 0.001{
             light.polygon = None;
+            let mut wv = velocity.wanted_velocity;
+            if velocity.jump_pressed {
+                wv -= glm::Vec2::new(0., 1. * 300.);
+                velocity.jump_pressed = false;
+            }
+            velocity.velocity = wv;
             position.position += velocity.velocity * fixed_delta_time as f32;
         }
     }
