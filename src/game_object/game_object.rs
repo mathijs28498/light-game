@@ -242,6 +242,8 @@ pub struct Position {
 #[derive(Component)]
 pub struct Velocity {
     pub velocity: glm::Vec2,
+    pub wanted_velocity: glm::Vec2,
+    pub jump_pressed: bool,
 }
 
 #[derive(Component)]
@@ -308,9 +310,9 @@ impl Light {
         &mut self,
         position: &Position,
         env_object_query: &Query<&AABB, With<EnvironmentObjectComp>>,
-    ) -> Vec<glm::Vec2> {
+    ) -> (Vec<glm::Vec2>, bool) {
         if let Some(polygon) = &self.polygon {
-            return polygon.clone();
+            return (polygon.clone(), false);
         }
 
         // let mut p_rays_go: Vec<(&Box<dyn EnvironmentObject>, Vec<Ray>)> = Vec::new(); // Vec::with_capacity(points.len());
@@ -375,6 +377,6 @@ impl Light {
         let polygon_c = polygon.clone();
         self.polygon = Some(polygon);
 
-        polygon_c
+        (polygon_c, true)
     }
 }
