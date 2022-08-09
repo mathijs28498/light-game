@@ -97,7 +97,7 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
         .insert(PlayerLight)
         .insert(render_object);
 
-    generate_random_lights(&mut commands, &queue, 40);
+    // generate_random_lights(&mut commands, &queue, 40);
     generate_random_aabbs(&mut commands, 0);
 
     let bb_offset = 500.;

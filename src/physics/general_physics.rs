@@ -80,14 +80,6 @@ fn player_input_system(
         }
     }
 
-    // if keyboard_input.just_pressed(KeyCode::S) {
-    //     velocity.velocity += glm::Vec2::new(0., 1.);
-    // } else if keyboard_input.just_released(KeyCode::S) {
-    //     velocity_vec += glm::Vec2::new(1., 0.);
-    // }
-
-    // println!("{:?}", velocity_vec);
-
     velocity.wanted_velocity = velocity_vec * speed_mult + glm::Vec2::new(0., velocity.velocity.y);
 }
 
@@ -95,7 +87,8 @@ fn solve_position(mut last_time: Local<f64>, time: Res<Time>, mut velocity_posit
     let fixed_delta_time = time.seconds_since_startup() - *last_time;
     for (mut velocity, mut position, mut light) in velocity_position_query.iter_mut() {
         if velocity.jump_pressed || velocity.wanted_velocity.magnitude_squared() > 0.001 * 0.001 || velocity.velocity.magnitude_squared() > 0.001 * 0.001{
-            light.polygon = None;
+            // light.polygon = None;
+            light.has_moved = true;
             let mut wv = velocity.wanted_velocity;
             if velocity.jump_pressed {
                 wv -= glm::Vec2::new(0., 1. * 300.);
