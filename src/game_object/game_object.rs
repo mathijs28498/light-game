@@ -1,10 +1,9 @@
 use std::f32::consts::PI;
 
-use crate::game_object::help_functions::calculate_clockwise_points;
+use crate::game_object::help_functions::sort_clockwise;
 
 use bevy::prelude::*;
 use nalgebra_glm as glm;
-
 
 #[derive(Component)]
 pub struct EnvironmentObjectComp;
@@ -68,6 +67,10 @@ impl Ray {
         self.orig + self.dir * t
     }
 
+    fn get_point(&self) -> glm::Vec2 {
+        self.get_point_from_t(self.t)
+    }
+
     fn get_angle_rays(&self, epsilon: Option<f32>) -> [Ray; 2] {
         let e = epsilon.unwrap_or(0.0001);
         let mut alpha = self.dir.x.acos();
@@ -116,6 +119,10 @@ impl EnvironmentObject for Line {
         Some(Collision::new(t0, vec![ray.get_point_from_t(t0)]))
     }
 
+    fn circle_collision(&self, circle: &Circle) -> Option<Collision> {
+        None
+    }
+
     fn get_corners(&self) -> Vec<glm::Vec2> {
         vec![self.p0, self.p1]
     }
@@ -127,6 +134,7 @@ pub struct AABB {
     pub max: glm::Vec2,
     xminymax: glm::Vec2,
     xmaxymin: glm::Vec2,
+    center: glm::Vec2,
 }
 
 impl AABB {
@@ -136,7 +144,23 @@ impl AABB {
             max,
             xminymax: glm::Vec2::new(min.x, max.y),
             xmaxymin: glm::Vec2::new(max.x, min.y),
+            center: (max - min) * 0.5 + min,
         }
+    }
+
+    pub fn get_circle_collision_points(&self, cp: &glm::Vec2, circle: &Circle) -> [glm::Vec2; 2] {
+        let cp_to_circle = circle.center - cp;
+        let a = cp_to_circle.norm();
+        let cp_norm = cp_to_circle / a;
+        let perp_cp = glm::Vec2::new(-cp_norm.y, cp_norm.x);
+
+        let alpha = (a / circle.radius).acos();
+        let o = alpha.sin() * circle.radius;
+
+        [
+            (perp_cp * o + cp).clamp(&self.min, &self.max),
+            (perp_cp * -o + cp).clamp(&self.min, &self.max),
+        ]
     }
 }
 
@@ -180,8 +204,43 @@ impl EnvironmentObject for AABB {
         Some(Collision::new(t, vec![ray.get_point_from_t(t)]))
     }
 
+    fn circle_collision(&self, circle: &Circle) -> Option<Collision> {
+        let rect_to_circle = circle.center - self.center;
+        let rect_to_circle_clamped =
+            rect_to_circle.clamp(&(self.min - self.center), &(self.max - self.center));
+
+        let closest_point = rect_to_circle_clamped + self.center;
+        let a_sq = (closest_point - circle.center).magnitude_squared();
+        if a_sq > circle.radius * circle.radius {
+            return None;
+        }
+
+        let cp0 = glm::Vec2::new(closest_point.x, circle.center.y);
+        let cp1 = glm::Vec2::new(circle.center.x, closest_point.y);
+        let mut collision_points: Vec<glm::Vec2> = Vec::new();
+
+        if cp0 != circle.center {
+            collision_points.extend(self.get_circle_collision_points(&cp0, &circle));
+        }
+        if cp1 != circle.center {
+            collision_points.extend(self.get_circle_collision_points(&cp1, &circle));
+        }
+
+        Some(Collision::new(a_sq.sqrt(), collision_points))
+    }
+
     fn get_corners(&self) -> Vec<glm::Vec2> {
         vec![self.min, self.max, self.xminymax, self.xmaxymin]
+    }
+}
+
+pub trait ClampVec2 {
+    fn clamp(&self, min: &glm::Vec2, max: &glm::Vec2) -> glm::Vec2;
+}
+
+impl ClampVec2 for glm::Vec2 {
+    fn clamp(&self, min: &Self, max: &Self) -> Self {
+        glm::Vec2::new(self.x.clamp(min.x, max.x), self.y.clamp(min.y, max.y))
     }
 }
 
@@ -230,6 +289,10 @@ impl EnvironmentObject for DottedLine {
         res
     }
 
+    fn circle_collision(&self, circle: &Circle) -> Option<Collision> {
+        None
+    }
+
     fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision> {
         // Check if this collision is a bottleneck
         //  - could be optimized to O = log(N) (in stead of O = N^^2) to look for bounding line and then subdivide
@@ -260,7 +323,7 @@ pub struct MouseLight;
 #[derive(Component)]
 pub struct PlayerLight;
 
-#[derive(Component)]
+#[derive(Debug, Component)]
 pub struct Light {
     pub color: glm::Vec3,
     radius: f32,
@@ -319,99 +382,98 @@ impl Light {
         self.polygon = None;
     }
 
-    // TODO: Add optimizations back in
     pub fn calculate_light_polygon(
         &mut self,
         position: &Position,
         env_object_query: &Query<&AABB, With<EnvironmentObjectComp>>,
     ) -> (Vec<glm::Vec2>, bool) {
+        let collision_circle = Circle {
+            radius: self.max_radius * 1.05,
+            center: position.position.clone(),
+        };
+        // TODO: Fix jitter
+
+        // TODO: Improve this!!
+        // See if new polygon has to be calculated
         if let Some(polygon) = &self.polygon {
-            return (polygon.clone(), false);
+            if !self.has_moved {
+                return (polygon.clone(), false);
+            }
+
+            if !self.has_collided {
+                let mut has_collision = false;
+                for env_obj in env_object_query {
+                    if let Some(coll) = env_obj.circle_collision(&collision_circle) {
+                        has_collision = true;
+                        break;
+                    }
+                }
+                if !has_collision {
+                    return (polygon.clone(), false);
+                }
+            }
         }
 
-        println!("Recalculating...");
+        let mut circle_points = Vec::new();
 
-        let r = self.max_radius;
-        let r_extended = r * 1.05;
-        let center = position.position;
-
-        let mut actual_points = Vec::new();
         // Draw circle
         let amount_of_points = 10;
         let angle_diff = PI * 2. / amount_of_points as f32;
         for i in 0..amount_of_points {
             let mut angle = angle_diff * i as f32;
-            actual_points.push(glm::Vec2::new(angle.cos(), angle.sin()) * r_extended);
-
+            circle_points.push(glm::Vec2::new(angle.cos(), angle.sin()) * collision_circle.radius);
         }
 
-        let polygon = calculate_clockwise_points(actual_points, glm::Vec2::new(0., 0.));
-        let polygon_c = polygon.clone();
-        self.polygon = Some(polygon);
+        let mut env_objects = Vec::new();
+        let mut actual_points = Vec::new();
+
+        // Collide with environment objects
+        self.has_collided = false;
+        for env_obj in env_object_query {
+            if let Some(coll) = env_obj.circle_collision(&collision_circle) {
+                self.has_collided = true;
+                env_objects.push(env_obj);
+
+                for cp in &coll.collision_points {
+                    // TODO: Check among each other collided env_object
+
+                    let p_ray =
+                        Ray::new_between_points(collision_circle.center.clone(), cp, Some(1.));
+                    let angle_rays = p_ray.get_angle_rays(None);
+                    for r in angle_rays {
+                        if let None = env_obj.ray_collision(&r, true) {
+                            actual_points.push(r.dir * collision_circle.radius);
+                        } else {
+                            actual_points.push(cp - collision_circle.center);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Adding circle points that dont collide with object
+        for cp in circle_points {
+            let mut add_circle_point = true;
+            let ray = Ray::new_between_points(
+                position.position.clone(),
+                &(cp + position.position),
+                None,
+            );
+            for env_obj in &env_objects {
+                if let Some(_) = env_obj.ray_collision(&ray, false) {
+                    add_circle_point = false;
+                    break;
+                }
+            }
+            if add_circle_point {
+                actual_points.push(cp);
+            }
+        }
+
+        sort_clockwise(&mut actual_points, &glm::Vec2::new(0., 0.));
+        let polygon_c = actual_points.clone();
+        self.polygon = Some(actual_points);
+        self.has_moved = false;
         (polygon_c, true)
-
-        // // let mut p_rays_go: Vec<(&Box<dyn EnvironmentObject>, Vec<Ray>)> = Vec::new(); // Vec::with_capacity(points.len());
-        // let mut p_rays_go: Vec<Ray> = Vec::new(); // Vec::with_capacity(points.len());
-
-        // for go in env_object_query {
-        //     // let mut ray_env_object = None;
-        //     for p in go.get_corners() {
-        //         let p_ray = Ray::new_between_points(position.position.clone(), &p, None);
-        //         let mut add_point = true;
-        //         for go_ in env_object_query {
-        //             if let Some(coll) = go_.ray_collision(&p_ray, false) {
-        //                 add_point = false;
-        //                 break;
-        //             }
-        //         }
-
-        //         if add_point {
-        //             p_rays_go.push(p_ray);
-        //             // if let Some(ray_go) = ray_env_object {
-        //             //     // let test = p_rays_go.last_mut().unwrap().1.push(p_ray);
-        //             //     p_rays_go.last_mut().expect("Couldn't get last item of p_rays_go").1.push(p_ray);
-        //             // } else {
-        //             //     p_rays_go.push((go, vec![p_ray]));
-        //             //     ray_env_object = Some(go);
-        //             // }
-        //         }
-        //     }
-        // }
-
-        // let mut actual_points: Vec<glm::Vec2> = Vec::with_capacity(p_rays_go.len() * 2);
-        // // for (ray_go, p_rays) in p_rays_go {
-        // for p_ray in p_rays_go {
-        //     let p_angle_ray = p_ray.get_angle_rays(None);
-
-        //     for p_ray in p_angle_ray {
-        //         let mut t_near = f32::MAX;
-        //         let mut closest_point = None;
-
-        //         // if let Some(coll) = ray_go.ray_collision(&p_ray, true) {
-        //         //     actual_points.push(coll.collision_points[0]);
-        //         //     continue;
-        //         // }
-
-        //         for go in env_object_query {
-        //             if let Some(coll) = go.ray_collision(&p_ray, true) {
-        //                 if coll.t < t_near {
-        //                     t_near = coll.t;
-        //                     closest_point = Some(coll.collision_points[0]);
-        //                 }
-        //             }
-        //         }
-
-        //         if let Some(cp) = closest_point {
-        //             actual_points.push(cp);
-        //         }
-        //     }
-        // }
-        // // }
-
-        // let polygon = calculate_clockwise_points(actual_points, position.position);
-        // let polygon_c = polygon.clone();
-        // self.polygon = Some(polygon);
-
-        // (polygon_c, true)
     }
 }

@@ -43,7 +43,6 @@ fn player_input_system(
     aabb_query: Query<&AABB, With<EnvironmentObjectComp>>,
     keyboard_input: Res<Input<KeyCode>>,
 ) {
-    // return;
     let speed_mult = 300.;
     let (mut velocity, mut position) = player_query.single_mut();
     let mut velocity_vec = glm::Vec2::new(0., 0.);
