@@ -436,7 +436,6 @@ impl Light {
 
                 for cp in &coll.collision_points {
                     // TODO: Check among each other collided env_object
-
                     let p_ray =
                         Ray::new_between_points(collision_circle.center.clone(), cp, Some(1.));
                     let angle_rays = p_ray.get_angle_rays(None);

@@ -82,6 +82,8 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
     let format = window_renderer.swapchain_format();
 
     let render_object = RenderObject::<SimpleVertex>::new(queue.clone());
+    let vulkano_device = VulkanoDevice::new::<SimpleVertex>(queue, format);
+    commands.insert_resource(vulkano_device);
 
     commands
         .spawn()
@@ -93,19 +95,19 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
             wanted_velocity: glm::Vec2::new(0., 0.),
             jump_pressed: false,
         })
-        .insert(Light::new(glm::Vec3::new(0.1, 0.45, 0.7), 100., 1.5))
+        .insert(Light::new(glm::Vec3::new(0.1, 0.45, 0.7), 200., 1.5))
         .insert(PlayerLight)
         // .insert(MouseLight)
         .insert(render_object);
 
-    // generate_random_lights(&mut commands, &queue, 40);
+    // generate_random_lights(&mut commands, &queue, 1000);
     generate_random_aabbs(&mut commands, 0);
 
     commands
         .spawn()
         .insert(AABB::new(
             glm::Vec2::new(100., 530.),
-            glm::Vec2::new(300., 1080.),
+            glm::Vec2::new(300., 550.),
         ))
         .insert(EnvironmentObjectComp);
 
@@ -148,9 +150,6 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
             glm::Vec2::new(900., 165.),
         ))
         .insert(EnvironmentObjectComp);
-
-    let vulkano_device = VulkanoDevice::new::<SimpleVertex>(queue, format);
-    commands.insert_resource(vulkano_device);
 }
 
 fn pre_render_setup_system(
