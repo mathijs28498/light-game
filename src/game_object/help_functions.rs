@@ -12,7 +12,7 @@ pub fn get_all_points(env_objects: &Vec<Box<dyn EnvironmentObject>>) -> Vec<glm:
     points
 }
 
-pub fn calculate_clockwise_points(mut points: Vec<glm::Vec2>, center: glm::Vec2) -> Vec<glm::Vec2> {
+pub fn sort_clockwise(points: &mut Vec<glm::Vec2>, center: &glm::Vec2) {
     points.sort_by(|a, b| {
         let vec0 = a - center;
         let vec1 = b - center;
@@ -42,7 +42,6 @@ pub fn calculate_clockwise_points(mut points: Vec<glm::Vec2>, center: glm::Vec2)
             a, alpha0, dir0, b, alpha1, dir1
         ))
     });
-    points
 }
 
 pub fn calculate_indices_polygon(triangle_amount: usize) -> Vec<u32> {

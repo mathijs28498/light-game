@@ -125,7 +125,7 @@ fn update_light_polygons_system(
         });
 
         let mut vertices = vec![SimpleVertex {
-            position: [position.position.x, position.position.y],
+            position: [0., 0.],
         }];
         vertices.extend(light_vertices);
         while vertices.len() < 3 {
@@ -204,9 +204,9 @@ fn mouse_event_system(
         mp.position.x = event.position.x;
         mp.position.y = 720. - event.position.y;
 
-        for (mouse_light, mut position, mut light) in &mut mouse_light_query.iter_mut() {
-            position.position = mp.position.clone();
-            light.polygon = None;
-        }
+        // for (mouse_light, mut position, mut light) in &mut mouse_light_query.iter_mut() {
+        //     position.position = mp.position.clone();
+        //     light.polygon = None;
+        // }
     }
 }

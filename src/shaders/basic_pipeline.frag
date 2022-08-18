@@ -27,13 +27,16 @@ void main() {
 
 vec3 getLightColor(vec3 baseColor, float brightnessFactor, vec2 lightPos, float radius) {
     float pixelBrightness = map(radius - distance(gl_FragCoord.xy, lightPos), 0., radius, 0., 1.);
-    if (pixelBrightness < 0.) 
+    if (pixelBrightness < 0.) {
         pixelBrightness = 0.;
+        // pixelBrightness = 1.;
+    }
 
     pixelBrightness *= brightnessFactor;
     if (pixelBrightness > 1.) {
         pixelBrightness = pow(pixelBrightness, 2);
-    }
+    } 
+    
 
     return baseColor * pixelBrightness;
 
