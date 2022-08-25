@@ -33,7 +33,7 @@ use vulkano::{device::Features, pipeline::compute};
 use vulkano_backend::{
     compute_device::{self}, //ComputeDevice, PushConstants, BUFFER_SIZE, HEIGHT, WIDTH,},
     test_multi_render_passes::multi_main,
-    vulkano_device::{self, RenderObject, SimpleVertex, VulkanoDevice},
+    vulkano_device::{self, RenderObject, LightVertex, VulkanoDevice},
 };
 use vulkano_util::{context::VulkanoConfig, window::VulkanoWindows};
 
@@ -112,7 +112,8 @@ fn main() {
 }
 
 fn update_light_polygons_system(
-    mut light_query: Query<(&mut RenderObject<SimpleVertex>, &Position, &mut Light)>,
+    vulkano_device: Res<VulkanoDevice>,
+    mut light_query: Query<(&mut RenderObject<LightVertex>, &Position, &mut Light)>,
     env_object_query: Query<&AABB, With<EnvironmentObjectComp>>,
 ) {
     for (mut render_object, position, mut light) in &mut light_query.iter_mut() {
@@ -120,19 +121,19 @@ fn update_light_polygons_system(
         if !recalculate {
             continue;
         }
-        let light_vertices = light_polygon.iter().map(|p| SimpleVertex {
+        let light_vertices = light_polygon.iter().map(|p| LightVertex {
             position: [p.x, p.y],
         });
 
-        let mut vertices = vec![SimpleVertex {
+        let mut vertices = vec![LightVertex {
             position: [0., 0.],
         }];
         vertices.extend(light_vertices);
         while vertices.len() < 3 {
-            vertices.push(SimpleVertex { position: [0., 0.] });
+            vertices.push(LightVertex { position: [0., 0.] });
         }
 
-        render_object.update_vertex_buffer(vertices);
+        render_object.update_vertex_buffer(vertices, vulkano_device.queue.clone());
 
         // let indices = calculate_indices_polygon(vertices.len() - 1);
     }
@@ -144,10 +145,7 @@ fn mouse_event_system2(
     mut mouse_button_input_events: EventReader<MouseButtonInput>,
     mouse_position: Res<MousePosition>,
     player_query: Query<(&Position, &Light), With<PlayerLight>>,
-    vulkano_windows: NonSend<BevyVulkanoWindows>,
 ) {
-    let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
-    let queue = window_renderer.graphics_queue();
     let mp = mouse_position.as_ref();
 
     let colors = vec![
@@ -181,7 +179,7 @@ fn mouse_event_system2(
                     100.,
                     3.,
                 ))
-                .insert(RenderObject::<SimpleVertex>::new(queue.clone()))
+                .insert(RenderObject::<LightVertex>::new())
                 .insert(Velocity {
                     velocity: dir * 350.,
                     wanted_velocity: dir * 350.,

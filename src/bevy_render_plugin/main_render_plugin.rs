@@ -10,7 +10,7 @@ use vulkano::{image::ImageAccess, sync::GpuFuture};
 
 use crate::{
     game_object::game_object::*,
-    vulkano_backend::vulkano_device::{RenderObject, SimpleVertex, VertexTest, VulkanoDevice},
+    vulkano_backend::vulkano_device::{RenderObject, LightVertex, VertexTest, VulkanoDevice},
     MousePosition,
 };
 
@@ -35,6 +35,7 @@ pub struct MainRenderPlugin;
 impl Plugin for MainRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_startup_system(insert_render_pass_system)
+            .add_startup_system(insert_initial_game_objects_system)
             .add_stage_after(
                 CoreStage::PostUpdate,
                 RenderStage::GuiInit,
@@ -81,9 +82,12 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
     let queue = window_renderer.graphics_queue();
     let format = window_renderer.swapchain_format();
 
-    let render_object = RenderObject::<SimpleVertex>::new(queue.clone());
-    let vulkano_device = VulkanoDevice::new::<SimpleVertex>(queue, format);
+    let vulkano_device = VulkanoDevice::new::<LightVertex>(queue, format);
     commands.insert_resource(vulkano_device);
+}
+
+fn insert_initial_game_objects_system(mut commands: Commands) {
+    let render_object = RenderObject::<LightVertex>::new();
 
     commands
         .spawn()
@@ -100,7 +104,7 @@ fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<Be
         // .insert(MouseLight)
         .insert(render_object);
 
-    // generate_random_lights(&mut commands, &queue, 1000);
+    // generate_random_lights(&mut commands, 1000);
     generate_random_aabbs(&mut commands, 0);
 
     commands
@@ -177,7 +181,21 @@ fn pre_render_setup_system(
 fn post_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
+    diagnostics: Res<Diagnostics>,
 ) {
+    if let Some(diag) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
+        if let Some(avg) = diag.average() {
+            let primary = vulkano_windows
+                .get_winit_window(WindowId::primary())
+                .unwrap();
+            primary.set_title(&format!(
+                "Bevy Vulkano Game Of Life {:.2} fps ({:.2} ms/frame)",
+                avg,
+                1. / avg * 1000.
+            ));
+        }
+    }
+
     for (window_id, frame_data) in pipeline_frame_data.data_per_window.iter_mut() {
         let window_renderer =
             if let Some(window_renderer) = vulkano_windows.get_window_renderer_mut(*window_id) {
@@ -193,25 +211,12 @@ fn post_render_system(
 
 pub fn main_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    diagnostics: Res<Diagnostics>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut vulkano_device: ResMut<VulkanoDevice>,
-    light_query: Query<(&RenderObject<SimpleVertex>, &Position, &Light)>,
+    light_query: Query<(&RenderObject<LightVertex>, &Position, &Light)>,
     env_object_query: Query<(&EnvironmentObjectComp, &AABB)>,
     mouse_position: Res<MousePosition>,
 ) {
-    if let Some(diag) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
-        if let Some(avg) = diag.average() {
-            let primary = vulkano_windows
-                .get_winit_window(WindowId::primary())
-                .unwrap();
-            primary.set_title(&format!(
-                "Bevy Vulkano Game Of Life {:.2} fps ({:.2} ms/frame)",
-                avg,
-                1. / avg * 1000.
-            ));
-        }
-    }
 
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
     let window_renderer =
@@ -223,7 +228,6 @@ pub fn main_render_system(
 
     // We take the before pipeline future leaving None in its place
     if let Some(before_future) = frame_data.before.take() {
-        let final_image_view = window_renderer.swapchain_image_view();
         let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
             before_future,
             window_renderer.swapchain_image_view(),
@@ -259,7 +263,7 @@ fn generate_random_aabbs(commands: &mut Commands, amount_of_aabbs: usize) {
     }
 }
 
-fn generate_random_lights(commands: &mut Commands, queue: &Arc<Queue>, amount_of_lights: usize) {
+fn generate_random_lights(commands: &mut Commands, amount_of_lights: usize) {
     let colors = vec![
         glm::Vec3::new(0.85, 0.33, 0.04),
         glm::Vec3::new(0.23, 0.85, 0.09),
@@ -292,7 +296,7 @@ fn generate_random_lights(commands: &mut Commands, queue: &Arc<Queue>, amount_of
             rng.gen_range(100.0..300.0),
             rng.gen_range(0.2..0.8),
         );
-        let render_object = RenderObject::<SimpleVertex>::new(queue.clone());
+        let render_object = RenderObject::<LightVertex>::new();
         commands
             .spawn()
             .insert(light)

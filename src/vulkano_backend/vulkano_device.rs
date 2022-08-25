@@ -71,10 +71,10 @@ impl_vertex!(VertexTest, position, color);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct SimpleVertex {
+pub struct LightVertex {
     pub position: [f32; 2],
 }
-impl_vertex!(SimpleVertex, position);
+impl_vertex!(LightVertex, position);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -98,7 +98,6 @@ where
 {
     vertex_buffer: Option<Arc<ImmutableBuffer<[T]>>>,
     index_buffer: Option<Arc<ImmutableBuffer<[u32]>>>,
-    queue: Arc<Queue>,
 }
 
 impl<T> RenderObject<T>
@@ -106,22 +105,21 @@ where
     T: Zeroable + Pod,
     [T]: BufferContents,
 {
-    pub fn new(queue: Arc<Queue>) -> Self {
+    pub fn new() -> Self {
         Self {
             vertex_buffer: None,
             index_buffer: None,
-            queue,
         }
     }
 
-    pub fn update_vertex_buffer(&mut self, vertices: Vec<T>) {
-        let (index_buffer, ib_future)= calculate_index_buffer_polygon(&self.queue, vertices.len());
+    pub fn update_vertex_buffer(&mut self, vertices: Vec<T>, queue: Arc<Queue>) {
+        let (index_buffer, ib_future)= calculate_index_buffer_polygon(&queue, vertices.len());
 
 
         let (vertex_buffer, vb_future) = ImmutableBuffer::from_iter(
             vertices,
             BufferUsage::vertex_buffer(),
-            self.queue.clone(),
+            queue,
         ).unwrap();
 
         // vb_future.
@@ -278,7 +276,7 @@ impl RenderPassExecutor {
 }
 
 pub struct VulkanoDevice {
-    queue: Arc<Queue>,
+    pub queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
     descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
@@ -382,7 +380,7 @@ impl VulkanoDevice {
         &mut self,
         before_future: F,
         final_image: Arc<dyn ImageViewAbstract + 'static>,
-        light_query: Query<(&RenderObject<SimpleVertex>, &Position, &Light)>,
+        light_query: Query<(&RenderObject<LightVertex>, &Position, &Light)>,
         mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
     where
