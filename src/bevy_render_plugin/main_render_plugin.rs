@@ -189,7 +189,7 @@ fn post_render_system(
                 .get_winit_window(WindowId::primary())
                 .unwrap();
             primary.set_title(&format!(
-                "Bevy Vulkano Game Of Life {:.2} fps ({:.2} ms/frame)",
+                "Light game {:.2} fps ({:.2} ms/frame)",
                 avg,
                 1. / avg * 1000.
             ));
