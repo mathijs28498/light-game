@@ -1,28 +1,27 @@
-use bevy::{
-    diagnostic::{Diagnostics, FrameTimeDiagnosticsPlugin},
-    input::mouse::{self, MouseMotion},
-    prelude::*,
-    render::view::window,
-    window::WindowId,
-};
-use bevy_vulkano::{BevyVulkanoWindows, PipelineSyncData};
-use vulkano::{image::ImageAccess, sync::GpuFuture};
-
-use crate::{
-    game_object::game_object::*,
-    vulkano_backend::vulkano_device::{RenderObject, LightVertex, VertexTest, VulkanoDevice},
-    MousePosition,
-};
-
-use rand::Rng;
-use std::sync::Arc;
-
-use vulkano::device::Queue;
+pub(crate) mod components;
+pub(crate) mod data_types;
+pub(crate) mod functions;
+pub(crate) mod shader_data_types;
+pub(crate) mod system;
 
 use nalgebra_glm as glm;
 
+use rand::Rng;
+
+use bevy::{
+    app::*,
+    ecs::{schedule::*, system::Commands},
+};
+
+use crate::{
+    environment_objects::components::*,
+    general::components::*,
+    player::components::*,
+    rendering::{components::*, functions::*, shader_data_types::*, system::*},
+};
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
-pub enum RenderStage {
+pub(crate) enum RenderStage {
     GuiInit,
     GuiDefine,
     RenderStart,
@@ -30,7 +29,7 @@ pub enum RenderStage {
     RenderFinish,
 }
 
-pub struct MainRenderPlugin;
+pub(crate) struct MainRenderPlugin;
 
 impl Plugin for MainRenderPlugin {
     fn build(&self, app: &mut App) {
@@ -73,34 +72,28 @@ impl Plugin for MainRenderPlugin {
             .add_system_set_to_stage(
                 RenderStage::RenderFinish,
                 SystemSet::new().with_system(post_render_system),
-            );
+            )
+            .add_system(update_light_polygons_system);
     }
 }
 
-fn insert_render_pass_system(mut commands: Commands, vulkano_windows: NonSend<BevyVulkanoWindows>) {
-    let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
-    let queue = window_renderer.graphics_queue();
-    let format = window_renderer.swapchain_format();
-
-    let vulkano_device = VulkanoDevice::new::<LightVertex>(queue, format);
-    commands.insert_resource(vulkano_device);
-}
-
+// This fn is only used for test purposes
+// TODO: Add scenes/terrain generation module
 fn insert_initial_game_objects_system(mut commands: Commands) {
     let render_object = RenderObject::<LightVertex>::new();
 
     commands
         .spawn()
-        .insert(Position {
+        .insert(PositionComp {
             position: glm::Vec2::new(200., 450.),
         })
-        .insert(Velocity {
+        .insert(VelocityComp {
             velocity: glm::Vec2::new(0., 0.),
             wanted_velocity: glm::Vec2::new(0., 0.),
             jump_pressed: false,
         })
-        .insert(Light::new(glm::Vec3::new(0.1, 0.45, 0.7), 200., 1.5))
-        .insert(PlayerLight)
+        .insert(LightComp::new(glm::Vec3::new(0.1, 0.45, 0.7), 200., 1.5))
+        .insert(PlayerLightComp)
         // .insert(MouseLight)
         .insert(render_object);
 
@@ -109,7 +102,7 @@ fn insert_initial_game_objects_system(mut commands: Commands) {
 
     commands
         .spawn()
-        .insert(AABB::new(
+        .insert(AABBComp::new(
             glm::Vec2::new(100., 530.),
             glm::Vec2::new(300., 550.),
         ))
@@ -117,7 +110,7 @@ fn insert_initial_game_objects_system(mut commands: Commands) {
 
     commands
         .spawn()
-        .insert(AABB::new(
+        .insert(AABBComp::new(
             glm::Vec2::new(100., 320.),
             glm::Vec2::new(300., 330.),
         ))
@@ -125,7 +118,7 @@ fn insert_initial_game_objects_system(mut commands: Commands) {
 
     commands
         .spawn()
-        .insert(AABB::new(
+        .insert(AABBComp::new(
             glm::Vec2::new(750., 600.),
             glm::Vec2::new(900., 640.),
         ))
@@ -133,7 +126,7 @@ fn insert_initial_game_objects_system(mut commands: Commands) {
 
     commands
         .spawn()
-        .insert(AABB::new(
+        .insert(AABBComp::new(
             glm::Vec2::new(850., 450.),
             glm::Vec2::new(900., 460.),
         ))
@@ -141,7 +134,7 @@ fn insert_initial_game_objects_system(mut commands: Commands) {
 
     commands
         .spawn()
-        .insert(AABB::new(
+        .insert(AABBComp::new(
             glm::Vec2::new(850., 300.),
             glm::Vec2::new(900., 310.),
         ))
@@ -149,99 +142,14 @@ fn insert_initial_game_objects_system(mut commands: Commands) {
 
     commands
         .spawn()
-        .insert(AABB::new(
+        .insert(AABBComp::new(
             glm::Vec2::new(850., 135.),
             glm::Vec2::new(900., 165.),
         ))
         .insert(EnvironmentObjectComp);
 }
 
-fn pre_render_setup_system(
-    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    mut pipeline_frame_data: ResMut<PipelineSyncData>,
-) {
-    for (window_id, mut frame_data) in pipeline_frame_data.data_per_window.iter_mut() {
-        let window_renderer =
-            if let Some(window_renderer) = vulkano_windows.get_window_renderer_mut(*window_id) {
-                window_renderer
-            } else {
-                return;
-            };
-        let before = match window_renderer.acquire() {
-            Err(e) => {
-                bevy::log::error!("Failed to start frame: {}", e);
-                None
-            }
-            Ok(f) => Some(f),
-        };
-        frame_data.before = before;
-    }
-}
-
-fn post_render_system(
-    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    mut pipeline_frame_data: ResMut<PipelineSyncData>,
-    diagnostics: Res<Diagnostics>,
-) {
-    if let Some(diag) = diagnostics.get(FrameTimeDiagnosticsPlugin::FPS) {
-        if let Some(avg) = diag.average() {
-            let primary = vulkano_windows
-                .get_winit_window(WindowId::primary())
-                .unwrap();
-            primary.set_title(&format!(
-                "Light game {:.2} fps ({:.2} ms/frame)",
-                avg,
-                1. / avg * 1000.
-            ));
-        }
-    }
-
-    for (window_id, frame_data) in pipeline_frame_data.data_per_window.iter_mut() {
-        let window_renderer =
-            if let Some(window_renderer) = vulkano_windows.get_window_renderer_mut(*window_id) {
-                window_renderer
-            } else {
-                return;
-            };
-        if let Some(after) = frame_data.after.take() {
-            window_renderer.present(after, false);
-        }
-    }
-}
-
-pub fn main_render_system(
-    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    mut pipeline_frame_data: ResMut<PipelineSyncData>,
-    mut vulkano_device: ResMut<VulkanoDevice>,
-    light_query: Query<(&RenderObject<LightVertex>, &Position, &Light)>,
-    env_object_query: Query<(&EnvironmentObjectComp, &AABB)>,
-    mouse_position: Res<MousePosition>,
-) {
-
-    let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
-    let window_renderer =
-        if let Some(window_renderer) = vulkano_windows.get_primary_window_renderer_mut() {
-            window_renderer
-        } else {
-            return;
-        };
-
-    // We take the before pipeline future leaving None in its place
-    if let Some(before_future) = frame_data.before.take() {
-        let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
-            before_future,
-            window_renderer.swapchain_image_view(),
-            light_query,
-            &mouse_position,
-        );
-
-        let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();
-        // Update after pipeline future (so post render will know to present frame)
-        frame_data.after = Some(after_drawing);
-    }
-}
-
-fn generate_random_aabbs(commands: &mut Commands, amount_of_aabbs: usize) {
+pub(super) fn generate_random_aabbs(commands: &mut Commands, amount_of_aabbs: usize) {
     let offset = 20.;
     let min_size = 30.;
     let max_size = 100.;
@@ -258,12 +166,12 @@ fn generate_random_aabbs(commands: &mut Commands, amount_of_aabbs: usize) {
         );
         commands
             .spawn()
-            .insert(AABB::new(min, min + size))
+            .insert(AABBComp::new(min, min + size))
             .insert(EnvironmentObjectComp);
     }
 }
 
-fn generate_random_lights(commands: &mut Commands, amount_of_lights: usize) {
+pub(super) fn generate_random_lights(commands: &mut Commands, amount_of_lights: usize) {
     let colors = vec![
         glm::Vec3::new(0.85, 0.33, 0.04),
         glm::Vec3::new(0.23, 0.85, 0.09),
@@ -291,7 +199,7 @@ fn generate_random_lights(commands: &mut Commands, amount_of_lights: usize) {
             rng.gen_range(0.0..0.2) - 0.1,
             rng.gen_range(0.0..0.2) - 0.1,
         );
-        let light = Light::new(
+        let light = LightComp::new(
             colors[i % colors.len()] + color_offset,
             rng.gen_range(100.0..300.0),
             rng.gen_range(0.2..0.8),
@@ -301,7 +209,7 @@ fn generate_random_lights(commands: &mut Commands, amount_of_lights: usize) {
             .spawn()
             .insert(light)
             .insert(render_object)
-            .insert(Position {
+            .insert(PositionComp {
                 position: glm::Vec2::new(rng.gen_range(30.0..1250.0), rng.gen_range(30.0..690.0)),
             });
     }

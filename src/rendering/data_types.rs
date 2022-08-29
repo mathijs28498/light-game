@@ -1,149 +1,80 @@
-use bevy::prelude::*;
+use std::sync::Arc;
+
 use bytemuck::{Pod, Zeroable};
-use rand::{seq::index, Rng};
-use std::{
-    alloc::System,
-    cmp::max,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+
 use vulkano::{
+    image::{
+        ImageLayout,
+        ImageViewAbstract,
+        ImageAspects,
+        view::ImageView,
+    },
     buffer::{
-        BufferContents, BufferUsage, ImmutableBuffer, TypedBufferAccess,
+        ImmutableBuffer,
+        BufferContents,
+        TypedBufferAccess,
+    },
+    descriptor_set::{
+        PersistentDescriptorSet,
+        WriteDescriptorSet,
+    },
+    sync::{
+        GpuFuture,
     },
     command_buffer::{
-        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage,
-        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents, CommandBufferExecFuture
+        SubpassContents,
+        CommandBufferUsage,
+        RenderPassBeginInfo,
+        ClearColorImageInfo,
+        AutoCommandBufferBuilder,
+        PrimaryAutoCommandBuffer,
     },
-    descriptor_set::{DescriptorSet, PersistentDescriptorSet, WriteDescriptorSet},
-    device::{
-        physical::{PhysicalDevice, PhysicalDeviceType},
-        Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo,
-    },
-    format::Format,
-    image::ImageAspects,
-    image::ImageViewAbstract,
-    image::{view::ImageView, ImageAccess, ImageLayout, ImageUsage, SwapchainImage},
-    impl_vertex,
-    instance::{Instance, InstanceCreateInfo},
     pipeline::{
+        Pipeline,
+        PipelineBindPoint,
+        GraphicsPipeline,
         graphics::{
+            viewport::{
+                Viewport,
+                ViewportState,
+            },
             input_assembly::InputAssemblyState,
-            vertex_input::{BuffersDefinition, Vertex},
-            viewport::{Viewport, ViewportState},
-        },
-        GraphicsPipeline, Pipeline, PipelineBindPoint,
+            vertex_input::{
+                BuffersDefinition,
+                Vertex,
+            }
+        }
     },
     render_pass::{
-        AttachmentDescription, AttachmentReference, Framebuffer, FramebufferCreateInfo, LoadOp,
-        RenderPass, RenderPassCreateInfo, StoreOp, Subpass, SubpassDescription,
+        Subpass,
+        AttachmentReference,
+        SubpassDescription,
+        AttachmentDescription,
+        RenderPassCreateInfo,
+        RenderPass,
+        FramebufferCreateInfo,
+        Framebuffer,
+        StoreOp,
+        LoadOp,
     },
-    shader::ShaderModule,
-    swapchain::{
-        acquire_next_image, AcquireError, Surface, Swapchain, SwapchainCreateInfo,
-        SwapchainCreationError,
-    },
-    sync::{self, FlushError, GpuFuture, NowFuture},
+    device::Queue,
+    format::Format,
 };
-use vulkano_win::VkSurfaceBuild;
-use winit::{
-    event::{Event, KeyboardInput, VirtualKeyCode, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::{Window, WindowBuilder},
-};
+
+use bevy::ecs::system::Query;
 
 use crate::{
-    game_object::{
-        game_object::{DottedLine, EnvironmentObject, Light, Line, Position, AABB},
-        help_functions::{calculate_indices_polygon, get_all_points},
+    rendering::{
+        components::*,
+        shader_data_types::*,
     },
-    MousePosition,
+    player::components::*,
+    general::{
+        components::*,
+    }
 };
-use nalgebra_glm as glm;
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct VertexTest {
-    pub position: [f32; 2],
-    pub color: [f32; 3],
-}
-impl_vertex!(VertexTest, position, color);
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct LightVertex {
-    pub position: [f32; 2],
-}
-impl_vertex!(LightVertex, position);
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct PushConstants {
-    mouse_pos: glm::Vec2,
-    resolution: [f32; 2],
-    time_passed: f32,
-    light_radius: f32,
-    light_center: glm::Vec2,
-    light_color: glm::Vec3,
-    light_brightness: f32,
-}
-
-// Create generic for VertexTest
-// Add vertices to constructor
-#[derive(Component)]
-pub struct RenderObject<T>
-where
-    T: Zeroable + Pod,
-    [T]: BufferContents,
-{
-    vertex_buffer: Option<Arc<ImmutableBuffer<[T]>>>,
-    index_buffer: Option<Arc<ImmutableBuffer<[u32]>>>,
-}
-
-impl<T> RenderObject<T>
-where
-    T: Zeroable + Pod,
-    [T]: BufferContents,
-{
-    pub fn new() -> Self {
-        Self {
-            vertex_buffer: None,
-            index_buffer: None,
-        }
-    }
-
-    pub fn update_vertex_buffer(&mut self, vertices: Vec<T>, queue: Arc<Queue>) {
-        let (index_buffer, ib_future)= calculate_index_buffer_polygon(&queue, vertices.len());
-
-
-        let (vertex_buffer, vb_future) = ImmutableBuffer::from_iter(
-            vertices,
-            BufferUsage::vertex_buffer(),
-            queue,
-        ).unwrap();
-
-        // vb_future.
-        // TODO: Await futures!!
-
-        self.vertex_buffer = Some(vertex_buffer);
-        self.index_buffer = Some(index_buffer);
-    }
-}
-
-pub fn calculate_index_buffer_polygon(
-    queue: &Arc<Queue>,
-    amount_of_vertices: usize,
-) -> (Arc<ImmutableBuffer<[u32]>>, CommandBufferExecFuture<NowFuture, PrimaryAutoCommandBuffer>) {
-    let indices = calculate_indices_polygon(amount_of_vertices - 1);
-    ImmutableBuffer::from_iter(
-        indices,
-        BufferUsage::index_buffer(),
-        queue.clone(),
-    )
-    .unwrap()
-}
-
-pub struct RenderPassExecutor {
+pub(super) struct RenderPassExecutor {
     pipeline: Arc<GraphicsPipeline>,
     descriptor_set: Option<Arc<PersistentDescriptorSet>>,
     framebuffer: Arc<Framebuffer>,
@@ -151,8 +82,15 @@ pub struct RenderPassExecutor {
     viewport: Viewport,
 }
 
+pub(crate) struct VulkanoDevice {
+    pub queue: Arc<Queue>,
+    render_pass: Arc<RenderPass>,
+    pipeline: Arc<GraphicsPipeline>,
+    descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
+}
+
 impl RenderPassExecutor {
-    pub fn new(
+    pub(super) fn new(
         pipeline: Arc<GraphicsPipeline>,
         descriptor_set: Option<Arc<PersistentDescriptorSet>>,
         queue: Arc<Queue>,
@@ -191,7 +129,7 @@ impl RenderPassExecutor {
         }
     }
 
-    pub fn clear_framebuffer_image(&mut self) {
+    pub(super) fn clear_framebuffer_image(&mut self) {
         let fb_image = self.framebuffer.attachments()[0].image();
         self.command_buffer_builder
             .as_mut()
@@ -201,7 +139,7 @@ impl RenderPassExecutor {
     }
 
     // TODO: Make PushConstants generic
-    pub fn do_pass<T>(
+    pub(super) fn do_pass<T>(
         &mut self,
         vertex_buffer: Arc<ImmutableBuffer<[T]>>,
         index_buffer: Arc<ImmutableBuffer<[u32]>>,
@@ -261,7 +199,7 @@ impl RenderPassExecutor {
             .unwrap();
     }
 
-    fn execute<F>(&mut self, queue: Arc<Queue>, before_future: F) -> Box<dyn GpuFuture>
+    pub(super) fn execute<F>(&mut self, queue: Arc<Queue>, before_future: F) -> Box<dyn GpuFuture>
     where
         F: GpuFuture + 'static,
     {
@@ -273,23 +211,6 @@ impl RenderPassExecutor {
             .unwrap()
             .boxed()
     }
-}
-
-pub struct VulkanoDevice {
-    pub queue: Arc<Queue>,
-    render_pass: Arc<RenderPass>,
-    pipeline: Arc<GraphicsPipeline>,
-    descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
-    // descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
-    // event_loop: Option<EventLoop<()>>,
-    // surface: Arc<Surface<Window>>,
-    // device: Arc<Device>,
-    // queue: Arc<Queue>,
-    // swapchain: Arc<Swapchain<Window>>,
-    // render_pass: Arc<RenderPass>,
-    // viewport: Viewport,
-    // framebuffers: Vec<Arc<Framebuffer>>,
-    // descriptor_sets: Arc<Vec<Arc<PersistentDescriptorSet>>>,
 }
 
 impl VulkanoDevice {
@@ -380,7 +301,7 @@ impl VulkanoDevice {
         &mut self,
         before_future: F,
         final_image: Arc<dyn ImageViewAbstract + 'static>,
-        light_query: Query<(&RenderObject<LightVertex>, &Position, &Light)>,
+        light_query: Query<(&RenderObject<LightVertex>, &PositionComp, &LightComp)>,
         mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
     where
@@ -425,3 +346,6 @@ impl VulkanoDevice {
         executor.execute(self.queue.clone(), before_future)
     }
 }
+
+
+
