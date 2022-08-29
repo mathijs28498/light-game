@@ -29,9 +29,9 @@ pub(crate) enum RenderStage {
     RenderFinish,
 }
 
-pub(crate) struct MainRenderPlugin;
+pub(crate) struct RenderPlugin;
 
-impl Plugin for MainRenderPlugin {
+impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_startup_system(insert_render_pass_system)
             .add_startup_system(insert_initial_game_objects_system)
