@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::{
     general::data_types::*,
-    glm_traits::{
+    ext_traits::glm_traits::{
         traits::*,
         traits_impl::*,
     },

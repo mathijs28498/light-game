@@ -37,7 +37,7 @@ use bevy_vulkano::{VulkanoWinitConfig, VulkanoWinitPlugin};
 
 pub(crate) mod environment_objects;
 pub(crate) mod general;
-pub(crate) mod glm_traits;
+pub(crate) mod ext_traits;
 pub(crate) mod physics;
 pub(crate) mod player;
 pub(crate) mod rendering;
