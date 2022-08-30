@@ -1,7 +1,7 @@
 use nalgebra_glm as glm;
 
 use crate::{
-    ext_traits::glm_traits::traits::*,
+    ext::glm_ext::traits::*,
 };
 
 impl ExtraGLMVec2Func for glm::Vec2 {

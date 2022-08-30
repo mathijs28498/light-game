@@ -5,7 +5,7 @@
 #![allow(unreachable_code)]
 
 pub(crate) mod environment;
-pub(crate) mod ext_traits;
+pub(crate) mod ext;
 pub(crate) mod general;
 pub(crate) mod physics;
 pub(crate) mod player;

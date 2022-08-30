@@ -50,6 +50,7 @@ pub(crate) struct GeneralPluginBundle;
 
 impl PluginGroup for GeneralPluginBundle {
     fn build(&mut self, group: &mut PluginGroupBuilder) {
+        // Basic Bevy plugins
         group.add(LogPlugin);
         group.add(CorePlugin);
         group.add(TimePlugin);

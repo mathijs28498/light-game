@@ -3,11 +3,8 @@ use nalgebra_glm as glm;
 use bevy::prelude::*;
 
 use crate::{
+    ext::glm_ext::{traits::*, traits_impl::*},
     general::data_types::*,
-    ext_traits::glm_traits::{
-        traits::*,
-        traits_impl::*,
-    },
     rendering::components::*,
 };
 
