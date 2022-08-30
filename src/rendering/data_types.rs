@@ -3,75 +3,36 @@ use std::sync::Arc;
 use bytemuck::{Pod, Zeroable};
 
 use vulkano::{
-    image::{
-        ImageLayout,
-        ImageViewAbstract,
-        ImageAspects,
-        view::ImageView,
-    },
-    buffer::{
-        ImmutableBuffer,
-        BufferContents,
-        TypedBufferAccess,
-    },
-    descriptor_set::{
-        PersistentDescriptorSet,
-        WriteDescriptorSet,
-    },
-    sync::{
-        GpuFuture,
-    },
+    buffer::{BufferContents, ImmutableBuffer, TypedBufferAccess},
     command_buffer::{
-        SubpassContents,
-        CommandBufferUsage,
-        RenderPassBeginInfo,
-        ClearColorImageInfo,
-        AutoCommandBufferBuilder,
-        PrimaryAutoCommandBuffer,
+        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage,
+        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents,
     },
-    pipeline::{
-        Pipeline,
-        PipelineBindPoint,
-        GraphicsPipeline,
-        graphics::{
-            viewport::{
-                Viewport,
-                ViewportState,
-            },
-            input_assembly::InputAssemblyState,
-            vertex_input::{
-                BuffersDefinition,
-                Vertex,
-            }
-        }
-    },
-    render_pass::{
-        Subpass,
-        AttachmentReference,
-        SubpassDescription,
-        AttachmentDescription,
-        RenderPassCreateInfo,
-        RenderPass,
-        FramebufferCreateInfo,
-        Framebuffer,
-        StoreOp,
-        LoadOp,
-    },
+    descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet},
     device::Queue,
     format::Format,
+    image::{view::ImageView, ImageAspects, ImageLayout, ImageViewAbstract},
+    pipeline::{
+        graphics::{
+            input_assembly::InputAssemblyState,
+            vertex_input::{BuffersDefinition, Vertex},
+            viewport::{Viewport, ViewportState},
+        },
+        GraphicsPipeline, Pipeline, PipelineBindPoint,
+    },
+    render_pass::{
+        AttachmentDescription, AttachmentReference, Framebuffer, FramebufferCreateInfo, LoadOp,
+        RenderPass, RenderPassCreateInfo, StoreOp, Subpass, SubpassDescription,
+    },
+    sync::GpuFuture,
 };
 
 use bevy::ecs::system::Query;
 
 use crate::{
-    rendering::{
-        components::*,
-        shader_data_types::*,
-    },
+    general::{components::*, data_types::*},
     player::components::*,
-    general::{
-        components::*,
-    }
+    rendering::{components::*, shader_data_types::*},
 };
 
 pub(super) struct RenderPassExecutor {
@@ -346,6 +307,3 @@ impl VulkanoDevice {
         executor.execute(self.queue.clone(), before_future)
     }
 }
-
-
-

@@ -2,7 +2,7 @@ use nalgebra_glm as glm;
 
 use crate::{
     general::data_types::*,
-    environment_objects::{
+    environment::{
         traits::*,
         components::*,
     },

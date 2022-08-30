@@ -3,12 +3,11 @@ use bevy::app::Plugin;
 use bevy::ecs::system::Res;
 use bevy::input::{keyboard::KeyCode, Input};
 use bevy::prelude::*;
-use bevy::time::{FixedTimestep, FixedTimesteps};
 
 use nalgebra_glm as glm;
 
 use crate::{
-    environment_objects::{components::*, traits::*, traits_impl::*},
+    environment::{components::*, traits::*, traits_impl::*},
     general::{components::*, data_types::*},
     player::components::*,
     rendering::components::*,

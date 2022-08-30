@@ -31,7 +31,7 @@ impl Plugin for PhysicsPlugin {
                 PhysicsStage::FixedUpdate,
                 PhysicsStage::SolveVelocity,
                 SystemStage::parallel()
-                    .with_run_criteria(FixedTimestep::step(1. / 30.).with_label(LABEL))
+                    // .with_run_criteria(FixedTimestep::step(1. / 30.).with_label(LABEL))
                     .with_system(solve_position),
             );
     }

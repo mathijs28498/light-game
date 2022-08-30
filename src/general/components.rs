@@ -13,8 +13,3 @@ pub struct VelocityComp {
     pub(crate) wanted_velocity: glm::Vec2,
     pub(crate) jump_pressed: bool,
 }
-
-#[derive(Component)]
-pub struct MousePosition {
-    pub(crate) position: glm::Vec2,
-}

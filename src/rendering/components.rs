@@ -14,7 +14,7 @@ use vulkano::{
 use bevy::ecs::{query::*, system::*};
 
 use crate::{
-    environment_objects::{components::*, traits::*, traits_impl::*},
+    environment::{components::*, traits::*, traits_impl::*},
     general::{components::*, data_types::*, functions::*},
     rendering::functions::*,
 };

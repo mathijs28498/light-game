@@ -1,5 +1,9 @@
 use nalgebra_glm as glm;
 
+pub struct MousePosition {
+    pub(crate) position: glm::Vec2,
+}
+
 pub struct Circle {
     pub(crate) center: glm::Vec2,
     pub(crate) radius: f32,

@@ -25,10 +25,10 @@ use std::sync::Arc;
 use bevy_vulkano::{VulkanoWinitConfig, VulkanoWinitPlugin};
 
 use crate::{
-    environment_objects::components::*,
-    rendering::{components::*, shader_data_types::*},
-    general::components::*,
+    environment::components::*,
+    general::{components::*, data_types::*},
     player::components::*,
+    rendering::{components::*, shader_data_types::*},
 };
 
 // TODO: Make system on startup for renderobject that gets its queue

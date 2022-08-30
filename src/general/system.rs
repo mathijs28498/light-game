@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::{
-    general::components::*,
+    general::data_types::*,
 };
 
 // TODO: Make sure the mouse position is correct after resizing

@@ -8,13 +8,17 @@ use nalgebra_glm as glm;
 
 use rand::Rng;
 
+use bevy_vulkano::VulkanoWinitConfig;
+use vulkano::device::Features;
+use vulkano_util::context::VulkanoConfig;
+
 use bevy::{
     app::*,
     ecs::{schedule::*, system::Commands},
 };
 
 use crate::{
-    environment_objects::components::*,
+    environment::components::*,
     general::components::*,
     player::components::*,
     rendering::{components::*, functions::*, shader_data_types::*, system::*},

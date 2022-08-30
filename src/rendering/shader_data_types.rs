@@ -53,9 +53,8 @@ use winit::{
 };
 
 use crate::{
-    general::{components::*, functions::*},
-    environment_objects::components::*,
-    MousePosition,
+    general::{data_types::*, functions::*},
+    environment::components::*,
     rendering::{components::*, functions::*},
 };
 use nalgebra_glm as glm;

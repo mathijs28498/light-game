@@ -9,11 +9,10 @@ use bevy_vulkano::{BevyVulkanoWindows, PipelineSyncData};
 use vulkano::{image::ImageAccess, sync::GpuFuture};
 
 use crate::{
-    environment_objects::components::*,
-    general::components::*,
+    environment::components::*,
+    general::{components::*, data_types::*},
     player::components::*,
-    rendering::{components::*, functions::*, shader_data_types::*, data_types::*},
-    MousePosition,
+    rendering::{components::*, data_types::*, functions::*, shader_data_types::*},
 };
 
 use rand::Rng;
@@ -121,11 +120,16 @@ pub(super) fn main_render_system(
 
 pub(crate) fn update_light_polygons_system(
     vulkano_device: Res<VulkanoDevice>,
-    mut light_query: Query<(&mut RenderObject<LightVertex>, &PositionComp, &mut LightComp)>,
+    mut light_query: Query<(
+        &mut RenderObject<LightVertex>,
+        &PositionComp,
+        &mut LightComp,
+    )>,
     env_object_query: Query<&AABBComp, With<EnvironmentObjectComp>>,
 ) {
     for (mut render_object, position, mut light) in &mut light_query.iter_mut() {
-        let (light_polygon, recalculate) = light.calculate_light_polygon(&position, &env_object_query);
+        let (light_polygon, recalculate) =
+            light.calculate_light_polygon(&position, &env_object_query);
         if !recalculate {
             continue;
         }
@@ -133,9 +137,7 @@ pub(crate) fn update_light_polygons_system(
             position: [p.x, p.y],
         });
 
-        let mut vertices = vec![LightVertex {
-            position: [0., 0.],
-        }];
+        let mut vertices = vec![LightVertex { position: [0., 0.] }];
         vertices.extend(light_vertices);
         while vertices.len() < 3 {
             vertices.push(LightVertex { position: [0., 0.] });

@@ -14,7 +14,7 @@ use vulkano::{
 use bevy::ecs::system::Commands;
 
 use crate::{
-    environment_objects::components::*,
+    environment::components::*,
     general::components::*,
     rendering::{components::*, shader_data_types::*},
 };

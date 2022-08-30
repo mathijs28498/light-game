@@ -1,7 +1,7 @@
 use nalgebra_glm as glm;
 
 use crate::{
-    environment_objects::traits::*,
+    environment::traits::*,
 };
 
 // TODO: Allow any iterable form as argument
