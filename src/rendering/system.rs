@@ -105,6 +105,18 @@ pub(super) fn main_render_system(
 
     // We take the before pipeline future leaving None in its place
     if let Some(before_future) = frame_data.before.take() {
+        ///////////////////////////////////////
+        // Plan:
+        // 1. Create resource for each pipeline.
+        // 1.1. Each resource contains: pipeline, descriptor sets, pushconstant, queue.
+        //
+        // 2. Create different render objects to populate.
+        //
+        // 3. Create different Queries for different pipeline users.
+        //
+        // 4. Create a commandbuffer and execute the different pipelines in order.
+        ///////////////////////////////////////
+
         let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
             before_future,
             window_renderer.swapchain_image_view(),

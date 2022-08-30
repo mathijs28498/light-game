@@ -56,6 +56,10 @@ impl PluginGroup for GeneralPluginBundle {
         group.add(DiagnosticsPlugin);
         group.add(FrameTimeDiagnosticsPlugin);
         group.add(InputPlugin);
+
+        // This plugin has to go first. 
+        // If the WindowDescriptor is added after the vulkanowinitplugin,
+        // the fps will be capped at 60
         group.add(GeneralPlugin);
 
         // Don't add default bevy plugins or WinitPlugin. This owns "core loop" (runner).

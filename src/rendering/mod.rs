@@ -26,8 +26,6 @@ use crate::{
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 pub(crate) enum RenderStage {
-    GuiInit,
-    GuiDefine,
     RenderStart,
     Render,
     RenderFinish,
@@ -41,16 +39,6 @@ impl Plugin for RenderPlugin {
             .add_startup_system(insert_initial_game_objects_system)
             .add_stage_after(
                 CoreStage::PostUpdate,
-                RenderStage::GuiInit,
-                SystemStage::single_threaded(),
-            )
-            .add_stage_after(
-                RenderStage::GuiInit,
-                RenderStage::GuiDefine,
-                SystemStage::parallel(),
-            )
-            .add_stage_after(
-                RenderStage::GuiDefine,
                 RenderStage::RenderStart,
                 SystemStage::single_threaded(),
             )
