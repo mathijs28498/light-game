@@ -19,3 +19,11 @@ bytemuck = { version = "1.7", features = ["derive", "extern_crate_std", "min_con
 rand = "0.8.5"
 nalgebra = "*"
 nalgebra-glm = "0.17.0"
+
+# Enable a small amount of optimization in debug mode
+[profile.dev]
+opt-level = 1
+
+# Enable high optimizations for dependencies (incl. Bevy), but not for our code:
+[profile.dev.package."*"]
+opt-level = 3
