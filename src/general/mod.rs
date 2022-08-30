@@ -7,7 +7,12 @@ use nalgebra_glm as glm;
 
 use bevy::{
     app::PluginGroupBuilder,
+    core::CorePlugin,
+    diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
+    input::InputPlugin,
+    log::LogPlugin,
     prelude::*,
+    time::TimePlugin,
     window::{close_on_esc, PresentMode, WindowMode},
 };
 use bevy_vulkano::VulkanoWinitPlugin;
@@ -45,12 +50,12 @@ pub(crate) struct GeneralPluginBundle;
 
 impl PluginGroup for GeneralPluginBundle {
     fn build(&mut self, group: &mut PluginGroupBuilder) {
-        group.add(bevy::log::LogPlugin);
-        group.add(bevy::core::CorePlugin);
-        group.add(bevy::time::TimePlugin);
-        group.add(bevy::diagnostic::DiagnosticsPlugin);
-        group.add(bevy::diagnostic::FrameTimeDiagnosticsPlugin);
-        group.add(bevy::input::InputPlugin);
+        group.add(LogPlugin);
+        group.add(CorePlugin);
+        group.add(TimePlugin);
+        group.add(DiagnosticsPlugin);
+        group.add(FrameTimeDiagnosticsPlugin);
+        group.add(InputPlugin);
         group.add(GeneralPlugin);
 
         // Don't add default bevy plugins or WinitPlugin. This owns "core loop" (runner).
