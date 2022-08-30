@@ -51,6 +51,7 @@ impl PluginGroup for GeneralPluginBundle {
         group.add(bevy::diagnostic::DiagnosticsPlugin);
         group.add(bevy::diagnostic::FrameTimeDiagnosticsPlugin);
         group.add(bevy::input::InputPlugin);
+        group.add(GeneralPlugin);
 
         // Don't add default bevy plugins or WinitPlugin. This owns "core loop" (runner).
         // Bevy winit and render should be excluded
@@ -59,7 +60,6 @@ impl PluginGroup for GeneralPluginBundle {
         // Custom plugins
         group.add(RenderPlugin);
         group.add(PhysicsPlugin);
-        group.add(GeneralPlugin);
         group.add(PlayerPlugin);
     }
 }
