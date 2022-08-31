@@ -45,14 +45,13 @@ pub(super) fn pre_render_setup_system(
             } else {
                 return;
             };
-        let before = match window_renderer.acquire() {
+        frame_data.after = match window_renderer.acquire() {
             Err(e) => {
                 bevy::log::error!("Failed to start frame: {}", e);
                 None
             }
             Ok(f) => Some(f),
         };
-        frame_data.before = before;
     }
 }
 
@@ -104,34 +103,25 @@ pub(super) fn main_render_system(
         };
 
     // We take the before pipeline future leaving None in its place
-    if let Some(before_future) = frame_data.before.take() {
-        //////////////////////////////////////////////////////////////////////////////////////
-        // Plan:                                                                            //
-        // 1. Create resource for each pipeline.                                            //
-        // 1.1. Each resource contains: pipeline, descriptor sets, pushconstant, queue.     //
-        //                                                                                  //
-        // 2. Create different render objects to populate.                                  //
-        //                                                                                  //
-        // 3. Create different Queries for different pipeline users.                        //
-        //                                                                                  //
-        // 4. Create a commandbuffer and execute the different pipelines in order.          //
-        //////////////////////////////////////////////////////////////////////////////////////
-
-        let mut after_future: Box<dyn GpuFuture> = light_render_pipeline.do_pass(
-            before_future,
+    if let Some(mut after_future) = frame_data.after.take() {
+        //////////////////////////////////////////////////////////////////////////////////////////
+        // Plan:                                                                                //
+        // [X] 1. Create resource for each pipeline.                                            //
+        // [X] 1.1. Each resource contains: pipeline, descriptor sets, pushconstant, queue.     //
+        //                                                                                      //
+        // [ ] 2. Create different render objects to populate.                                  //
+        //                                                                                      //
+        // [ ] 3. Create different Queries for different pipeline users.                        //
+        //                                                                                      //
+        // [ ] 4. Create a commandbuffer and execute the different pipelines in order.          //
+        //////////////////////////////////////////////////////////////////////////////////////////
+        after_future = light_render_pipeline.do_pass(
+            after_future,
             window_renderer.swapchain_image_view(),
             window_renderer.image_index(),
             light_query,
             &mouse_position,
         );
-
-        // let mut after_future: Box<dyn GpuFuture> = light_render_pipeline.do_pass(
-        //     before_future,
-        //     window_renderer.swapchain_image_view(),
-        //     window_renderer.image_index(),
-        //     light_query,
-        //     &mouse_position,
-        // );
 
         let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();
         // Update after pipeline future (so post render will know to present frame)
