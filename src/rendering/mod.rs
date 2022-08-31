@@ -3,6 +3,8 @@ pub(crate) mod data_types;
 pub(crate) mod functions;
 pub(crate) mod shader_data_types;
 pub(crate) mod system;
+pub(crate) mod traits;
+pub(crate) mod traits_impl;
 
 use nalgebra_glm as glm;
 

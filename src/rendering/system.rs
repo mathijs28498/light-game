@@ -30,8 +30,8 @@ pub(super) fn insert_render_pass_system(
     let queue = window_renderer.graphics_queue();
     let format = window_renderer.swapchain_format();
 
-    let vulkano_device = VulkanoDevice::new::<LightVertex>(queue, format);
-    commands.insert_resource(vulkano_device);
+    let light_render_pipeline = LightRenderPipeline::new(queue, format);
+    commands.insert_resource(light_render_pipeline);
 }
 
 pub(super) fn pre_render_setup_system(
@@ -90,7 +90,7 @@ pub(super) fn post_render_system(
 pub(super) fn main_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
-    mut vulkano_device: ResMut<VulkanoDevice>,
+    mut light_render_pipeline: ResMut<LightRenderPipeline>,
     light_query: Query<(&RenderObject<LightVertex>, &PositionComp, &LightComp)>,
     env_object_query: Query<(&EnvironmentObjectComp, &AABBComp)>,
     mouse_position: Res<MousePosition>,
@@ -105,21 +105,23 @@ pub(super) fn main_render_system(
 
     // We take the before pipeline future leaving None in its place
     if let Some(before_future) = frame_data.before.take() {
-        ///////////////////////////////////////
-        // Plan:
-        // 1. Create resource for each pipeline.
-        // 1.1. Each resource contains: pipeline, descriptor sets, pushconstant, queue.
-        //
-        // 2. Create different render objects to populate.
-        //
-        // 3. Create different Queries for different pipeline users.
-        //
-        // 4. Create a commandbuffer and execute the different pipelines in order.
-        ///////////////////////////////////////
+        //////////////////////////////////////////////////////////////////////////////////////
+        // Plan:                                                                            //
+        // 1. Create resource for each pipeline.                                            //
+        // 1.1. Each resource contains: pipeline, descriptor sets, pushconstant, queue.     //
+        //                                                                                  //
+        // 2. Create different render objects to populate.                                  //
+        //                                                                                  //
+        // 3. Create different Queries for different pipeline users.                        //
+        //                                                                                  //
+        // 4. Create a commandbuffer and execute the different pipelines in order.          //
+        //////////////////////////////////////////////////////////////////////////////////////
 
-        let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
+        // window_renderer.image_index();
+        let mut after_future: Box<dyn GpuFuture> = light_render_pipeline.do_pass(
             before_future,
             window_renderer.swapchain_image_view(),
+            window_renderer.image_index(),
             light_query,
             &mouse_position,
         );
@@ -131,7 +133,7 @@ pub(super) fn main_render_system(
 }
 
 pub(crate) fn update_light_polygons_system(
-    vulkano_device: Res<VulkanoDevice>,
+    light_render_pipeline: Res<LightRenderPipeline>,
     mut light_query: Query<(
         &mut RenderObject<LightVertex>,
         &PositionComp,
@@ -155,7 +157,7 @@ pub(crate) fn update_light_polygons_system(
             vertices.push(LightVertex { position: [0., 0.] });
         }
 
-        render_object.update_vertex_buffer(vertices, vulkano_device.queue.clone());
+        render_object.update_vertex_buffer(vertices, light_render_pipeline.queue.clone());
 
         // let indices = calculate_indices_polygon(vertices.len() - 1);
     }
