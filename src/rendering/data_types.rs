@@ -35,143 +35,26 @@ use crate::{
     rendering::{components::*, shader_data_types::*},
 };
 
-pub(super) struct RenderPassExecutor {
-    pipeline: Arc<GraphicsPipeline>,
-    descriptor_set: Option<Arc<PersistentDescriptorSet>>,
-    framebuffer: Arc<Framebuffer>,
-    command_buffer_builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
-    viewport: Viewport,
-}
-
 pub struct LightRenderPipeline {
     pub(crate) queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
     descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
+    framebuffers: Vec<Option<Arc<Framebuffer>>>,
 }
 
-impl RenderPassExecutor {
-    pub(super) fn new(
-        pipeline: Arc<GraphicsPipeline>,
-        descriptor_set: Option<Arc<PersistentDescriptorSet>>,
-        queue: Arc<Queue>,
-        render_pass: Arc<RenderPass>,
-        image: Arc<dyn ImageViewAbstract + 'static>,
-    ) -> Self {
-        let dims = image.image().dimensions().width_height();
-        let framebuffer = Framebuffer::new(
-            render_pass,
-            FramebufferCreateInfo {
-                attachments: vec![image],
-                ..Default::default()
-            },
-        )
-        .unwrap();
+pub struct ImageRenderPipeline {
+    pub(crate) queue: Arc<Queue>,
+    render_pass: Arc<RenderPass>,
+    pipeline: Arc<GraphicsPipeline>,
+    descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
+    framebuffers: Vec<Option<Arc<Framebuffer>>>,
+}
 
-        let builder = AutoCommandBufferBuilder::primary(
-            queue.device().clone(),
-            queue.family(),
-            CommandBufferUsage::OneTimeSubmit,
-        )
-        .unwrap();
-
-        let viewport = Viewport {
-            origin: [0.0, 0.0],
-            dimensions: [dims[0] as f32, dims[1] as f32],
-            depth_range: 0.0..1.0,
-        };
-
-        Self {
-            pipeline,
-            descriptor_set,
-            framebuffer,
-            command_buffer_builder: Some(builder),
-            viewport,
-        }
-    }
-
-    pub(super) fn clear_framebuffer_image(&mut self) {
-        let fb_image = self.framebuffer.attachments()[0].image();
-        self.command_buffer_builder
-            .as_mut()
-            .unwrap()
-            .clear_color_image(ClearColorImageInfo::image(fb_image))
-            .unwrap();
-    }
-
-    // TODO: Make PushConstants generic
-    pub(super) fn do_pass<T>(
-        &mut self,
-        vertex_buffer: Arc<ImmutableBuffer<[T]>>,
-        index_buffer: Arc<ImmutableBuffer<[u32]>>,
-        push_constants: Option<PushConstants>,
-    ) where
-        T: Zeroable + Pod,
-        [T]: BufferContents,
-    {
-        let index_length = index_buffer.len();
-        let builder = self.command_buffer_builder.as_mut().unwrap();
-
-        builder
-            .begin_render_pass(
-                RenderPassBeginInfo {
-                    clear_values: vec![None],
-                    ..RenderPassBeginInfo::framebuffer(self.framebuffer.clone())
-                },
-                SubpassContents::Inline,
-            )
-            .unwrap()
-            .set_viewport(0, [self.viewport.clone()])
-            .bind_pipeline_graphics(self.pipeline.clone())
-            .bind_vertex_buffers(0, vertex_buffer)
-            .bind_index_buffer(index_buffer);
-
-        if let Some(pc) = push_constants {
-            builder.push_constants(self.pipeline.layout().clone(), 0, pc);
-        }
-
-        //                         .push_constants(pipeline.layout().clone(), 0, push_constants)
-        //                         .bind_descriptor_sets(
-        //                             PipelineBindPoint::Graphics,
-        //                             pipeline.layout().clone(),
-        //                             0,
-        //                             descriptor_sets[image_num].clone(),
-        //                         )
-        //                         .bind_vertex_buffers(0, vertex_buffer.clone())
-        //                         .bind_index_buffer(index_buffer.clone())
-        //                         .draw_indexed(index_buffer.len() as u32, 1, 0, 0, 0)
-        //                         .unwrap()
-        //                         .end_render_pass()
-        //                         .unwrap();
-
-        if let Some(descriptor_set) = &self.descriptor_set {
-            builder.bind_descriptor_sets(
-                PipelineBindPoint::Graphics,
-                self.pipeline.layout().clone(),
-                0,
-                descriptor_set.clone(),
-            );
-        }
-
-        builder
-            .draw_indexed(index_length as u32, 1, 0, 0, 0)
-            .unwrap()
-            .end_render_pass()
-            .unwrap();
-    }
-
-    pub(super) fn execute<F>(&mut self, queue: Arc<Queue>, before_future: F) -> Box<dyn GpuFuture>
-    where
-        F: GpuFuture + 'static,
-    {
-        before_future
-            .then_execute(
-                queue,
-                self.command_buffer_builder.take().unwrap().build().unwrap(),
-            )
-            .unwrap()
-            .boxed()
-    }
+pub(super) struct RenderPassExecutor {
+    pub(super) command_buffer_builder: Option<AutoCommandBufferBuilder<PrimaryAutoCommandBuffer>>,
+    queue: Arc<Queue>,
+    pub(super) viewport: Viewport,
 }
 
 impl LightRenderPipeline {
@@ -252,13 +135,14 @@ impl LightRenderPipeline {
             render_pass,
             pipeline,
             descriptor_sets: vec![None, None, None],
+            framebuffers: vec![None, None, None],
         }
     }
 
     pub(crate) fn do_pass<F>(
         &mut self,
         before_future: F,
-        final_image: Arc<dyn ImageViewAbstract + 'static>,
+        image: Arc<dyn ImageViewAbstract + 'static>,
         image_index: usize,
         light_query: Query<(&RenderObject<LightVertex>, &PositionComp, &LightComp)>,
         mouse_position: &MousePosition,
@@ -266,7 +150,8 @@ impl LightRenderPipeline {
     where
         F: GpuFuture + 'static,
     {
-        let dims = final_image.image().dimensions().width_height();
+        // Get the descriptor set/framebuffer in constructor
+        let dims = image.image().dimensions().width_height();
 
         let descriptor_set = match &self.descriptor_sets[image_index] {
             Some(ds) => ds.clone(),
@@ -275,7 +160,7 @@ impl LightRenderPipeline {
                     self.pipeline.layout().set_layouts()[0].clone(),
                     [WriteDescriptorSet::image_view(
                         0,
-                        ImageView::new_default(final_image.image().clone()).unwrap(),
+                        ImageView::new_default(image.image().clone()).unwrap(),
                     )],
                 )
                 .unwrap();
@@ -284,32 +169,108 @@ impl LightRenderPipeline {
             }
         };
 
-        let mut executor = RenderPassExecutor::new(
-            self.pipeline.clone(),
-            Some(descriptor_set),
-            self.queue.clone(),
-            self.render_pass.clone(),
-            final_image.clone(),
-        );
+        let framebuffer = match &self.framebuffers[image_index] {
+            Some(fb) => fb.clone(),
+            None => {
+                let fb = Framebuffer::new(
+                    self.render_pass.clone(),
+                    FramebufferCreateInfo {
+                        attachments: vec![image.clone()],
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                self.framebuffers[image_index] = Some(fb.clone());
+                fb
+            }
+        };
 
-        executor.clear_framebuffer_image();
+        let mut executor = RenderPassExecutor::new(image.clone(), self.queue.clone());
+        let mut builder = executor.command_buffer_builder.as_mut().unwrap();
+
+        builder
+            .clear_color_image(ClearColorImageInfo::image(
+                framebuffer.attachments()[0].image(),
+            ))
+            .expect("Failed to clear color image");
+
         for (render_object, position, light) in &light_query {
             if let Some(vertex_buffer) = render_object.vertex_buffer.as_ref() {
-                executor.do_pass(
-                    vertex_buffer.clone(),
-                    render_object.index_buffer.as_ref().unwrap().clone(),
-                    Some(PushConstants {
-                        mouse_pos: mouse_position.position.clone(),
-                        resolution: [dims[0] as f32, dims[1] as f32],
-                        time_passed: 0.,
-                        light_brightness: light.brightness,
-                        light_radius: light.get_radius(),
-                        light_center: position.position.clone(),
-                        light_color: light.color,
-                    }),
-                );
+                let index_buffer = render_object.index_buffer.as_ref().unwrap().clone();
+                let index_length = index_buffer.len();
+
+                builder
+                    .begin_render_pass(
+                        RenderPassBeginInfo {
+                            clear_values: vec![None],
+                            ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
+                        },
+                        SubpassContents::Inline,
+                    )
+                    .unwrap()
+                    .set_viewport(0, [executor.viewport.clone()])
+                    .bind_pipeline_graphics(self.pipeline.clone())
+                    .bind_vertex_buffers(0, vertex_buffer.clone())
+                    .bind_index_buffer(index_buffer)
+                    .push_constants(
+                        self.pipeline.layout().clone(),
+                        0,
+                        PushConstants {
+                            mouse_pos: mouse_position.position.clone(),
+                            resolution: [dims[0] as f32, dims[1] as f32],
+                            time_passed: 0.,
+                            light_brightness: light.brightness,
+                            light_radius: light.get_radius(),
+                            light_center: position.position.clone(),
+                            light_color: light.color,
+                        },
+                    )
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        self.pipeline.layout().clone(),
+                        0,
+                        descriptor_set.clone(),
+                    )
+                    .draw_indexed(index_length as u32, 1, 0, 0, 0)
+                    .unwrap()
+                    .end_render_pass()
+                    .unwrap();
             }
         }
-        executor.execute(self.queue.clone(), before_future)
+        executor.execute(before_future)
+    }
+}
+
+impl RenderPassExecutor {
+    pub(super) fn new(image: Arc<dyn ImageViewAbstract + 'static>, queue: Arc<Queue>) -> Self {
+        let dims = image.image().dimensions().width_height();
+        let viewport = Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [dims[0] as f32, dims[1] as f32],
+            depth_range: 0.0..1.0,
+        };
+
+        let builder = AutoCommandBufferBuilder::primary(
+            queue.device().clone(),
+            queue.family(),
+            CommandBufferUsage::OneTimeSubmit,
+        )
+        .unwrap();
+
+        Self {
+            command_buffer_builder: Some(builder),
+            queue,
+            viewport,
+        }
+    }
+
+    pub(super) fn execute<F>(&mut self, future: F) -> Box<dyn GpuFuture>
+    where
+        F: GpuFuture + 'static,
+    {
+        future
+            .then_execute(self.queue.clone(), self.command_buffer_builder.take().unwrap().build().unwrap())
+            .unwrap()
+            .boxed()
     }
 }

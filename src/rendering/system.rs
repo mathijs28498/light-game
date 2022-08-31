@@ -117,7 +117,6 @@ pub(super) fn main_render_system(
         // 4. Create a commandbuffer and execute the different pipelines in order.          //
         //////////////////////////////////////////////////////////////////////////////////////
 
-        // window_renderer.image_index();
         let mut after_future: Box<dyn GpuFuture> = light_render_pipeline.do_pass(
             before_future,
             window_renderer.swapchain_image_view(),
@@ -125,6 +124,14 @@ pub(super) fn main_render_system(
             light_query,
             &mouse_position,
         );
+
+        // let mut after_future: Box<dyn GpuFuture> = light_render_pipeline.do_pass(
+        //     before_future,
+        //     window_renderer.swapchain_image_view(),
+        //     window_renderer.image_index(),
+        //     light_query,
+        //     &mouse_position,
+        // );
 
         let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();
         // Update after pipeline future (so post render will know to present frame)
