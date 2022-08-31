@@ -43,8 +43,8 @@ pub(super) struct RenderPassExecutor {
     viewport: Viewport,
 }
 
-pub(crate) struct VulkanoDevice {
-    pub queue: Arc<Queue>,
+pub struct LightRenderPipeline {
+    pub(crate) queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
     descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
@@ -174,16 +174,13 @@ impl RenderPassExecutor {
     }
 }
 
-impl VulkanoDevice {
-    pub fn new<T>(queue: Arc<Queue>, final_output_format: Format) -> Self
-    where
-        T: Vertex,
-    {
+impl LightRenderPipeline {
+    pub(crate) fn new(queue: Arc<Queue>, image_format: Format) -> Self {
         let render_pass = RenderPass::new(
             queue.device().clone(),
             RenderPassCreateInfo {
                 attachments: vec![AttachmentDescription {
-                    format: Some(final_output_format),
+                    format: Some(image_format),
                     // We keep the previous contents of the swapchain image unchanged...
                     load_op: LoadOp::Load,
                     // ...and store the result.
@@ -242,7 +239,7 @@ impl VulkanoDevice {
 
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .vertex_input_state(BuffersDefinition::new().vertex::<T>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<LightVertex>())
             .input_assembly_state(InputAssemblyState::new())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
@@ -254,14 +251,15 @@ impl VulkanoDevice {
             queue,
             render_pass,
             pipeline,
-            descriptor_sets: Vec::new(),
+            descriptor_sets: vec![None, None, None],
         }
     }
 
-    pub fn do_pass<F>(
+    pub(crate) fn do_pass<F>(
         &mut self,
         before_future: F,
         final_image: Arc<dyn ImageViewAbstract + 'static>,
+        image_index: usize,
         light_query: Query<(&RenderObject<LightVertex>, &PositionComp, &LightComp)>,
         mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
@@ -269,18 +267,26 @@ impl VulkanoDevice {
         F: GpuFuture + 'static,
     {
         let dims = final_image.image().dimensions().width_height();
-        let descriptor_set = PersistentDescriptorSet::new(
-            self.pipeline.layout().set_layouts()[0].clone(),
-            [WriteDescriptorSet::image_view(
-                0,
-                ImageView::new_default(final_image.image().clone()).unwrap(),
-            )],
-        )
-        .unwrap();
+
+        let descriptor_set = match &self.descriptor_sets[image_index] {
+            Some(ds) => ds.clone(),
+            None => {
+                let ds = PersistentDescriptorSet::new(
+                    self.pipeline.layout().set_layouts()[0].clone(),
+                    [WriteDescriptorSet::image_view(
+                        0,
+                        ImageView::new_default(final_image.image().clone()).unwrap(),
+                    )],
+                )
+                .unwrap();
+                self.descriptor_sets[image_index] = Some(ds.clone());
+                ds
+            }
+        };
 
         let mut executor = RenderPassExecutor::new(
             self.pipeline.clone(),
-            Some(descriptor_set.clone()),
+            Some(descriptor_set),
             self.queue.clone(),
             self.render_pass.clone(),
             final_image.clone(),
