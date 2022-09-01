@@ -61,11 +61,10 @@ use nalgebra_glm as glm;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct VertexTest {
+pub struct ImageVertex {
     pub position: [f32; 2],
-    pub color: [f32; 3],
 }
-impl_vertex!(VertexTest, position, color);
+impl_vertex!(ImageVertex, position);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]

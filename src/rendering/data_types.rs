@@ -106,14 +106,14 @@ impl LightRenderPipeline {
         mod vs {
             vulkano_shaders::shader! {
                 ty: "vertex",
-                path: "src/shaders/basic_pipeline.vert"
+                path: "src/shaders/light_pipeline.vert"
             }
         }
 
         mod fs {
             vulkano_shaders::shader! {
                 ty: "fragment",
-                path: "src/shaders/basic_pipeline.frag"
+                path: "src/shaders/light_pipeline.frag"
             }
         }
 
@@ -225,6 +225,171 @@ impl LightRenderPipeline {
                             light_color: light.color,
                         },
                     )
+                    .bind_descriptor_sets(
+                        PipelineBindPoint::Graphics,
+                        self.pipeline.layout().clone(),
+                        0,
+                        descriptor_set.clone(),
+                    )
+                    .draw_indexed(index_length as u32, 1, 0, 0, 0)
+                    .unwrap()
+                    .end_render_pass()
+                    .unwrap();
+            }
+        }
+        executor.execute(before_future)
+    }
+}
+
+impl ImageRenderPipeline {
+    pub(crate) fn new(queue: Arc<Queue>, image_format: Format) -> Self {
+        let render_pass = RenderPass::new(
+            queue.device().clone(),
+            RenderPassCreateInfo {
+                attachments: vec![AttachmentDescription {
+                    format: Some(image_format),
+                    // We keep the previous contents of the swapchain image unchanged...
+                    load_op: LoadOp::Load,
+                    // ...and store the result.
+                    store_op: StoreOp::Store,
+                    // When acquired, images in the swapchain are in the `Undefined` layout which
+                    // must be transitioned into a different one if you want to use the data. You can
+                    // use any other layout, but `General` is the only one which works for all purposes.
+                    initial_layout: ImageLayout::General,
+                    final_layout: ImageLayout::PresentSrc,
+                    ..Default::default()
+                }],
+                subpasses: vec![SubpassDescription {
+                    color_attachments: vec![Some(AttachmentReference {
+                        attachment: 0,
+                        // The only valid image layouts for color attachments are
+                        // `ColorAttachmentOptimal` and `General`.
+                        layout: ImageLayout::General,
+                        ..Default::default()
+                    })],
+                    input_attachments: vec![Some(AttachmentReference {
+                        attachment: 0,
+                        // The only valid layouts for input attachments are
+                        // `ShaderReadOnlyOptimal` and `General`.
+                        layout: ImageLayout::General,
+                        aspects: ImageAspects {
+                            // We select the color aspect. Not that there is anything else, we will be
+                            // binding a swapchain image.
+                            color: true,
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        mod vs {
+            vulkano_shaders::shader! {
+                ty: "vertex",
+                path: "src/shaders/image_pipeline.vert"
+            }
+        }
+
+        mod fs {
+            vulkano_shaders::shader! {
+                ty: "fragment",
+                path: "src/shaders/image_pipeline.frag"
+            }
+        }
+
+        let vs = vs::load(queue.device().clone()).unwrap();
+        let fs = fs::load(queue.device().clone()).unwrap();
+
+        let pipeline = GraphicsPipeline::start()
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .vertex_input_state(BuffersDefinition::new().vertex::<ImageVertex>())
+            .input_assembly_state(InputAssemblyState::new())
+            .vertex_shader(vs.entry_point("main").unwrap(), ())
+            .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
+            .fragment_shader(fs.entry_point("main").unwrap(), ())
+            .build(queue.device().clone())
+            .unwrap();
+
+        Self {
+            queue,
+            render_pass,
+            pipeline,
+            descriptor_sets: vec![None, None, None],
+            framebuffers: vec![None, None, None],
+        }
+    }
+
+    pub(crate) fn do_pass<F>(
+        &mut self,
+        before_future: F,
+        image: Arc<dyn ImageViewAbstract + 'static>,
+        image_index: usize,
+        image_query: Query<&RenderObject<ImageVertex>>,
+        mouse_position: &MousePosition,
+    ) -> Box<dyn GpuFuture>
+    where
+        F: GpuFuture + 'static,
+    {
+        // Get the descriptor set/framebuffer in constructor
+        let dims = image.image().dimensions().width_height();
+
+        let descriptor_set = match &self.descriptor_sets[image_index] {
+            Some(ds) => ds.clone(),
+            None => {
+                let ds = PersistentDescriptorSet::new(
+                    self.pipeline.layout().set_layouts()[0].clone(),
+                    [WriteDescriptorSet::image_view(
+                        0,
+                        ImageView::new_default(image.image().clone()).unwrap(),
+                    )],
+                )
+                .unwrap();
+                self.descriptor_sets[image_index] = Some(ds.clone());
+                ds
+            }
+        };
+
+        let framebuffer = match &self.framebuffers[image_index] {
+            Some(fb) => fb.clone(),
+            None => {
+                let fb = Framebuffer::new(
+                    self.render_pass.clone(),
+                    FramebufferCreateInfo {
+                        attachments: vec![image.clone()],
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                self.framebuffers[image_index] = Some(fb.clone());
+                fb
+            }
+        };
+
+        let mut executor = RenderPassExecutor::new(image.clone(), self.queue.clone());
+        let mut builder = executor.command_buffer_builder.as_mut().unwrap();
+
+        for render_object in &image_query {
+            if let Some(vertex_buffer) = render_object.vertex_buffer.as_ref() {
+                let index_buffer = render_object.index_buffer.as_ref().unwrap().clone();
+                let index_length = index_buffer.len();
+
+                builder
+                    .begin_render_pass(
+                        RenderPassBeginInfo {
+                            clear_values: vec![None],
+                            ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
+                        },
+                        SubpassContents::Inline,
+                    )
+                    .unwrap()
+                    .set_viewport(0, [executor.viewport.clone()])
+                    .bind_pipeline_graphics(self.pipeline.clone())
+                    .bind_vertex_buffers(0, vertex_buffer.clone())
+                    .bind_index_buffer(index_buffer)
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
                         self.pipeline.layout().clone(),

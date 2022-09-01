@@ -31,6 +31,13 @@ pub(crate) fn calculate_indices_polygon(triangle_amount: usize) -> Vec<u32> {
     indices
 }
 
+pub(super) fn create_index_buffer(indices: Vec<u32>, queue: Arc<Queue>) -> (
+    Arc<ImmutableBuffer<[u32]>>,
+    CommandBufferExecFuture<NowFuture, PrimaryAutoCommandBuffer>,
+) {
+    ImmutableBuffer::from_iter(indices, BufferUsage::index_buffer(), queue.clone()).unwrap()
+}
+
 pub(super) fn calculate_index_buffer_polygon(
     queue: &Arc<Queue>,
     amount_of_vertices: usize,

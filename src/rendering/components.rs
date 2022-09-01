@@ -192,7 +192,20 @@ where
         }
     }
 
-    pub fn update_vertex_buffer(&mut self, vertices: Vec<T>, queue: Arc<Queue>) {
+    pub fn set_buffers(&mut self, vertices: Vec<T>, indices: Vec<u32>, queue: Arc<Queue>) {
+        let (index_buffer, ib_future) = 
+            create_index_buffer(indices, queue.clone());
+
+        let (vertex_buffer, vb_future) =
+            ImmutableBuffer::from_iter(vertices, BufferUsage::vertex_buffer(), queue).unwrap();
+
+        // TODO: Await futures!!
+
+        self.vertex_buffer = Some(vertex_buffer);
+        self.index_buffer = Some(index_buffer);
+    }
+
+    pub fn update_vertex_buffer_light(&mut self, vertices: Vec<T>, queue: Arc<Queue>) {
         let (index_buffer, ib_future) = calculate_index_buffer_polygon(&queue, vertices.len());
 
         let (vertex_buffer, vb_future) =

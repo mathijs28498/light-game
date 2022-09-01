@@ -10,20 +10,23 @@ use nalgebra_glm as glm;
 
 use rand::Rng;
 
-use bevy_vulkano::VulkanoWinitConfig;
+use bevy_vulkano::{BevyVulkanoWindows, VulkanoWinitConfig};
 use vulkano::device::Features;
 use vulkano_util::context::VulkanoConfig;
 
 use bevy::{
     app::*,
-    ecs::{schedule::*, system::Commands},
+    ecs::{
+        schedule::*,
+        system::{Commands, NonSend, ResMut},
+    },
 };
 
 use crate::{
     environment::components::*,
     general::components::*,
     player::components::*,
-    rendering::{components::*, functions::*, shader_data_types::*, system::*},
+    rendering::{components::*, data_types::*, functions::*, shader_data_types::*, system::*},
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
@@ -73,7 +76,13 @@ impl Plugin for RenderPlugin {
 
 // This fn is only used for test purposes
 // TODO: Add scenes/terrain generation module
-fn insert_initial_game_objects_system(mut commands: Commands) {
+fn insert_initial_game_objects_system(
+    mut commands: Commands,
+    vulkano_windows: NonSend<BevyVulkanoWindows>,
+) {
+    let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
+    let queue = window_renderer.graphics_queue();
+
     let render_object = RenderObject::<LightVertex>::new();
 
     commands
@@ -90,6 +99,26 @@ fn insert_initial_game_objects_system(mut commands: Commands) {
         .insert(PlayerLightComp)
         // .insert(MouseLight)
         .insert(render_object);
+
+    let mut render_object = RenderObject::<ImageVertex>::new();
+    render_object.set_buffers(
+        vec![
+            ImageVertex {
+                position: [-1., -1.],
+            },
+            ImageVertex {
+                position: [-1., 1.],
+            },
+            ImageVertex {
+                position: [1., -1.],
+            },
+            ImageVertex { position: [1., 1.] },
+        ],
+        vec![0, 1, 2, 2, 1, 3],
+        queue,
+    );
+
+    commands.spawn().insert(render_object);
 
     // generate_random_lights(&mut commands, 1000);
     generate_random_aabbs(&mut commands, 0);
