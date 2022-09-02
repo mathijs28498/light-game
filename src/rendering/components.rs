@@ -30,7 +30,7 @@ pub struct LightComp {
     has_collided: bool,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct RenderObject<T>
 where
     T: Zeroable + Pod,

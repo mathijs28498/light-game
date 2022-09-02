@@ -215,7 +215,7 @@ impl LightRenderPipeline {
                     .push_constants(
                         self.pipeline.layout().clone(),
                         0,
-                        PushConstants {
+                        LightPushConstants {
                             mouse_pos: mouse_position.position.clone(),
                             resolution: [dims[0] as f32, dims[1] as f32],
                             time_passed: 0.,
@@ -328,7 +328,7 @@ impl ImageRenderPipeline {
         before_future: F,
         image: Arc<dyn ImageViewAbstract + 'static>,
         image_index: usize,
-        image_query: Query<&RenderObject<ImageVertex>>,
+        image_query: Query<(&RenderObject<ImageVertex>, &PositionComp)>,
         mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
     where
@@ -372,7 +372,7 @@ impl ImageRenderPipeline {
         let mut executor = RenderPassExecutor::new(image.clone(), self.queue.clone());
         let mut builder = executor.command_buffer_builder.as_mut().unwrap();
 
-        for render_object in &image_query {
+        for (render_object, position) in &image_query {
             if let Some(vertex_buffer) = render_object.vertex_buffer.as_ref() {
                 let index_buffer = render_object.index_buffer.as_ref().unwrap().clone();
                 let index_length = index_buffer.len();
@@ -390,6 +390,15 @@ impl ImageRenderPipeline {
                     .bind_pipeline_graphics(self.pipeline.clone())
                     .bind_vertex_buffers(0, vertex_buffer.clone())
                     .bind_index_buffer(index_buffer)
+                    .push_constants(
+                        self.pipeline.layout().clone(),
+                        0,
+                        ImagePushConstants {
+                            resolution: [dims[0] as f32, dims[1] as f32],
+                            model_center: position.position.clone(),
+                            color_mult: 0.5,
+                        },
+                    )
                     .bind_descriptor_sets(
                         PipelineBindPoint::Graphics,
                         self.pipeline.layout().clone(),

@@ -95,7 +95,7 @@ pub(super) fn main_render_system(
     mut light_render_pipeline: ResMut<LightRenderPipeline>,
     mut image_render_pipeline: ResMut<ImageRenderPipeline>,
     light_query: Query<(&RenderObject<LightVertex>, &PositionComp, &LightComp)>,
-    image_query: Query<&RenderObject<ImageVertex>>,
+    image_query: Query<(&RenderObject<ImageVertex>, &PositionComp)>,
     env_object_query: Query<(&EnvironmentObjectComp, &AABBComp)>,
     mouse_position: Res<MousePosition>,
 ) {
@@ -107,28 +107,29 @@ pub(super) fn main_render_system(
             return;
         };
 
-    // We take the before pipeline future leaving None in its place
-    if let Some(mut after_future) = frame_data.after.take() {
-        after_future = light_render_pipeline.do_pass(
-            after_future,
-            window_renderer.swapchain_image_view(),
-            window_renderer.image_index(),
-            light_query,
-            &mouse_position,
-        );
+    // Make each render pass its own system with its own stage.
+    // Mutate the future rather than sending it
+    // if let Some(mut after_future) =  {
+    frame_data.after = Some(light_render_pipeline.do_pass(
+        frame_data.after.take().unwrap(),
+        window_renderer.swapchain_image_view(),
+        window_renderer.image_index(),
+        light_query,
+        &mouse_position,
+    ));
 
-        after_future = image_render_pipeline.do_pass(
-            after_future,
-            window_renderer.swapchain_image_view(),
-            window_renderer.image_index(),
-            image_query,
-            &mouse_position,
-        );
+    frame_data.after = Some(image_render_pipeline.do_pass(
+        frame_data.after.take().unwrap(),
+        window_renderer.swapchain_image_view(),
+        window_renderer.image_index(),
+        image_query,
+        &mouse_position,
+    ));
 
-        let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();
-        // Update after pipeline future (so post render will know to present frame)
-        frame_data.after = Some(after_drawing);
-    }
+    let after_drawing = frame_data.after.take().unwrap().then_signal_fence_and_flush().unwrap().boxed();
+    // Update after pipeline future (so post render will know to present frame)
+    frame_data.after = Some(after_drawing);
+    // }
 }
 
 pub(crate) fn update_light_polygons_system(

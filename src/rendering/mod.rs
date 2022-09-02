@@ -83,7 +83,27 @@ fn insert_initial_game_objects_system(
     let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
     let queue = window_renderer.graphics_queue();
 
-    let render_object = RenderObject::<LightVertex>::new();
+    let light_render_object = RenderObject::<LightVertex>::new();
+    let mut image_render_object = RenderObject::<ImageVertex>::new();
+    let iro_size = 60.;
+    image_render_object.set_buffers(
+        vec![
+            ImageVertex {
+                position: [-iro_size, -iro_size],
+            },
+            ImageVertex {
+                position: [-iro_size, iro_size],
+            },
+            ImageVertex {
+                position: [iro_size, -iro_size],
+            },
+            ImageVertex {
+                position: [iro_size, iro_size],
+            },
+        ],
+        vec![0, 1, 2, 2, 1, 3],
+        queue,
+    );
 
     commands
         .spawn()
@@ -95,39 +115,27 @@ fn insert_initial_game_objects_system(
             wanted_velocity: glm::Vec2::new(0., 0.),
             jump_pressed: false,
         })
-        .insert(LightComp::new(glm::Vec3::new(0.1, 0.45, 0.7), 200., 1.5))
+        .insert(LightComp::new(glm::Vec3::new(0.1, 0.45, 0.7), 200., 2.5))
         .insert(PlayerLightComp)
         // .insert(MouseLight)
-        .insert(render_object);
+        .insert(light_render_object)
+        .insert(image_render_object.clone());
 
-    let mut render_object = RenderObject::<ImageVertex>::new();
-    render_object.set_buffers(
-        vec![
-            ImageVertex {
-                position: [-1., -1.],
-            },
-            ImageVertex {
-                position: [-1., 1.],
-            },
-            ImageVertex {
-                position: [1., -1.],
-            },
-            ImageVertex { position: [1., 1.] },
-        ],
-        vec![0, 1, 2, 2, 1, 3],
-        queue,
-    );
+    commands
+        .spawn()
+        .insert(image_render_object)
+        .insert(PositionComp {
+            position: glm::Vec2::new(400., 500.),
+        });
 
-    commands.spawn().insert(render_object);
-
-    // generate_random_lights(&mut commands, 1000);
+    // generate_random_lights(&mut commands, 10);
     generate_random_aabbs(&mut commands, 0);
 
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(100., 530.),
-            glm::Vec2::new(300., 550.),
+            glm::Vec2::new(100., 570.),
+            glm::Vec2::new(300., 590.),
         ))
         .insert(EnvironmentObjectComp);
 
