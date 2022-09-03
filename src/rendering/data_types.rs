@@ -144,7 +144,7 @@ impl LightRenderPipeline {
         before_future: F,
         image: Arc<dyn ImageViewAbstract + 'static>,
         image_index: usize,
-        light_query: Query<(&RenderObject<LightVertex>, &PositionComp, &LightComp)>,
+        light_query: Query<(&RenderObjectComp<LightVertex>, &PositionComp, &LightComp)>,
         mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
     where
@@ -290,14 +290,14 @@ impl ImageRenderPipeline {
         mod vs {
             vulkano_shaders::shader! {
                 ty: "vertex",
-                path: "src/shaders/image_pipeline.vert"
+                path: "src/shaders/creature_pipeline.vert"
             }
         }
 
         mod fs {
             vulkano_shaders::shader! {
                 ty: "fragment",
-                path: "src/shaders/image_pipeline.frag"
+                path: "src/shaders/creature_pipeline.frag"
             }
         }
 
@@ -328,7 +328,7 @@ impl ImageRenderPipeline {
         before_future: F,
         image: Arc<dyn ImageViewAbstract + 'static>,
         image_index: usize,
-        image_query: Query<(&RenderObject<ImageVertex>, &PositionComp)>,
+        image_query: Query<(&RenderObjectComp<ImageVertex>, &PositionComp, &CreatureComp)>,
         mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
     where
@@ -372,7 +372,7 @@ impl ImageRenderPipeline {
         let mut executor = RenderPassExecutor::new(image.clone(), self.queue.clone());
         let mut builder = executor.command_buffer_builder.as_mut().unwrap();
 
-        for (render_object, position) in &image_query {
+        for (render_object, position, creature) in &image_query {
             if let Some(vertex_buffer) = render_object.vertex_buffer.as_ref() {
                 let index_buffer = render_object.index_buffer.as_ref().unwrap().clone();
                 let index_length = index_buffer.len();
@@ -396,7 +396,7 @@ impl ImageRenderPipeline {
                         ImagePushConstants {
                             resolution: [dims[0] as f32, dims[1] as f32],
                             model_center: position.position.clone(),
-                            color_mult: 0.5,
+                            model_color: creature.color.clone(),
                         },
                     )
                     .bind_descriptor_sets(

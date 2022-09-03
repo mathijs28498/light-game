@@ -30,8 +30,13 @@ pub struct LightComp {
     has_collided: bool,
 }
 
+#[derive(Debug, Component)]
+pub struct CreatureComp {
+    pub color: glm::Vec3
+}
+
 #[derive(Component, Clone)]
-pub struct RenderObject<T>
+pub struct RenderObjectComp<T>
 where
     T: Zeroable + Pod,
     [T]: BufferContents,
@@ -94,7 +99,7 @@ impl LightComp {
         env_object_query: &Query<&AABBComp, With<EnvironmentObjectComp>>,
     ) -> (Vec<glm::Vec2>, bool) {
         let collision_circle = Circle {
-            radius: self.max_radius * 1.05,
+            radius: self.max_radius * 1.2,
             center: position.position.clone(),
         };
         // TODO: Fix jitter
@@ -180,7 +185,7 @@ impl LightComp {
     }
 }
 
-impl<T> RenderObject<T>
+impl<T> RenderObjectComp<T>
 where
     T: Zeroable + Pod,
     [T]: BufferContents,

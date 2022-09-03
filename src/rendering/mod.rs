@@ -32,7 +32,8 @@ use crate::{
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 pub(crate) enum RenderStage {
     RenderStart,
-    Render,
+    RenderLight,
+    RenderCreature,
     RenderFinish,
 }
 
@@ -49,11 +50,16 @@ impl Plugin for RenderPlugin {
             )
             .add_stage_after(
                 RenderStage::RenderStart,
-                RenderStage::Render,
+                RenderStage::RenderLight,
                 SystemStage::single_threaded(),
             )
             .add_stage_after(
-                RenderStage::Render,
+                RenderStage::RenderLight,
+                RenderStage::RenderCreature,
+                SystemStage::single_threaded(),
+            )
+            .add_stage_after(
+                RenderStage::RenderCreature,
                 RenderStage::RenderFinish,
                 SystemStage::single_threaded(),
             )
@@ -63,8 +69,12 @@ impl Plugin for RenderPlugin {
                 SystemSet::new().with_system(pre_render_setup_system),
             )
             .add_system_set_to_stage(
-                RenderStage::Render,
-                SystemSet::new().with_system(main_render_system),
+                RenderStage::RenderLight,
+                SystemSet::new().with_system(light_render_system),
+            )
+            .add_system_set_to_stage(
+                RenderStage::RenderCreature,
+                SystemSet::new().with_system(creature_render_system),
             )
             .add_system_set_to_stage(
                 RenderStage::RenderFinish,
@@ -83,8 +93,8 @@ fn insert_initial_game_objects_system(
     let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
     let queue = window_renderer.graphics_queue();
 
-    let light_render_object = RenderObject::<LightVertex>::new();
-    let mut image_render_object = RenderObject::<ImageVertex>::new();
+    let light_render_object = RenderObjectComp::<LightVertex>::new();
+    let mut image_render_object = RenderObjectComp::<ImageVertex>::new();
     let iro_size = 60.;
     image_render_object.set_buffers(
         vec![
@@ -115,18 +125,20 @@ fn insert_initial_game_objects_system(
             wanted_velocity: glm::Vec2::new(0., 0.),
             jump_pressed: false,
         })
-        .insert(LightComp::new(glm::Vec3::new(0.1, 0.45, 0.7), 200., 2.5))
+        .insert(LightComp::new(glm::Vec3::new(0.1, 0.45, 0.7), 300., 2.5))
         .insert(PlayerLightComp)
         // .insert(MouseLight)
         .insert(light_render_object)
-        .insert(image_render_object.clone());
+        .insert(image_render_object.clone())
+        .insert(CreatureComp{color: glm::Vec3::new(0.1, 0.8, 0.4)});
 
     commands
         .spawn()
         .insert(image_render_object)
         .insert(PositionComp {
             position: glm::Vec2::new(400., 500.),
-        });
+        })
+        .insert(CreatureComp{color: glm::Vec3::new(0.8, 0.3, 0.4)});
 
     // generate_random_lights(&mut commands, 10);
     generate_random_aabbs(&mut commands, 0);
@@ -142,8 +154,8 @@ fn insert_initial_game_objects_system(
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(100., 320.),
-            glm::Vec2::new(300., 330.),
+            glm::Vec2::new(100., 100.),
+            glm::Vec2::new(300., 230.),
         ))
         .insert(EnvironmentObjectComp);
 
@@ -235,7 +247,7 @@ pub(super) fn generate_random_lights(commands: &mut Commands, amount_of_lights: 
             rng.gen_range(100.0..300.0),
             rng.gen_range(0.2..0.8),
         );
-        let render_object = RenderObject::<LightVertex>::new();
+        let render_object = RenderObjectComp::<LightVertex>::new();
         commands
             .spawn()
             .insert(light)

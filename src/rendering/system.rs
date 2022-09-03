@@ -84,19 +84,17 @@ pub(super) fn post_render_system(
                 return;
             };
         if let Some(after) = frame_data.after.take() {
+            let after = after.then_signal_fence_and_flush().unwrap().boxed();
             window_renderer.present(after, false);
         }
     }
 }
 
-pub(super) fn main_render_system(
+pub(super) fn light_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut light_render_pipeline: ResMut<LightRenderPipeline>,
-    mut image_render_pipeline: ResMut<ImageRenderPipeline>,
-    light_query: Query<(&RenderObject<LightVertex>, &PositionComp, &LightComp)>,
-    image_query: Query<(&RenderObject<ImageVertex>, &PositionComp)>,
-    env_object_query: Query<(&EnvironmentObjectComp, &AABBComp)>,
+    light_query: Query<(&RenderObjectComp<LightVertex>, &PositionComp, &LightComp)>,
     mouse_position: Res<MousePosition>,
 ) {
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
@@ -109,7 +107,6 @@ pub(super) fn main_render_system(
 
     // Make each render pass its own system with its own stage.
     // Mutate the future rather than sending it
-    // if let Some(mut after_future) =  {
     frame_data.after = Some(light_render_pipeline.do_pass(
         frame_data.after.take().unwrap(),
         window_renderer.swapchain_image_view(),
@@ -117,6 +114,22 @@ pub(super) fn main_render_system(
         light_query,
         &mouse_position,
     ));
+}
+
+pub(super) fn creature_render_system(
+    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    mut pipeline_frame_data: ResMut<PipelineSyncData>,
+    mut image_render_pipeline: ResMut<ImageRenderPipeline>,
+    image_query: Query<(&RenderObjectComp<ImageVertex>, &PositionComp, &CreatureComp)>,
+    mouse_position: Res<MousePosition>,
+) {
+    let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
+    let window_renderer =
+        if let Some(window_renderer) = vulkano_windows.get_primary_window_renderer_mut() {
+            window_renderer
+        } else {
+            return;
+        };
 
     frame_data.after = Some(image_render_pipeline.do_pass(
         frame_data.after.take().unwrap(),
@@ -125,17 +138,12 @@ pub(super) fn main_render_system(
         image_query,
         &mouse_position,
     ));
-
-    let after_drawing = frame_data.after.take().unwrap().then_signal_fence_and_flush().unwrap().boxed();
-    // Update after pipeline future (so post render will know to present frame)
-    frame_data.after = Some(after_drawing);
-    // }
 }
 
 pub(crate) fn update_light_polygons_system(
     light_render_pipeline: Res<LightRenderPipeline>,
     mut light_query: Query<(
-        &mut RenderObject<LightVertex>,
+        &mut RenderObjectComp<LightVertex>,
         &PositionComp,
         &mut LightComp,
     )>,

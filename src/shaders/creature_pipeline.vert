@@ -3,7 +3,7 @@
 layout(push_constant) uniform PushConstantData {
     vec2 resolution;
     vec2 modelCenter;
-    float color_mult;
+    vec3 modelColor;
 } pc;
 
 layout(location = 0) in vec2 position;

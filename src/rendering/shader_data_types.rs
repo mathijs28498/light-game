@@ -88,5 +88,5 @@ pub(super) struct LightPushConstants {
 pub(super) struct ImagePushConstants {
     pub(super) resolution: [f32; 2],
     pub(super) model_center: glm::Vec2,
-    pub(super) color_mult: f32,
+    pub(super) model_color: glm::Vec3,
 }
