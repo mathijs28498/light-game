@@ -16,8 +16,10 @@ use bevy::ecs::{query::*, system::*};
 use crate::{
     environment::{components::*, traits::*, traits_impl::*},
     general::{components::*, data_types::*, functions::*},
-    rendering::functions::*,
+    rendering::functions::*, physics::data_types::Collision,
 };
+
+use super::shader_data_types::ImageVertex;
 
 #[derive(Debug, Component)]
 pub struct LightComp {
@@ -32,7 +34,7 @@ pub struct LightComp {
 
 #[derive(Debug, Component)]
 pub struct CreatureComp {
-    pub color: glm::Vec3
+    pub color: glm::Vec3,
 }
 
 #[derive(Component, Clone)]
@@ -93,18 +95,22 @@ impl LightComp {
         self.polygon = None;
     }
 
+    fn get_collision_circle(&self, position: Option<glm::Vec2>) -> Circle {
+        Circle {
+            radius: self.max_radius * 1.1,
+            center: position.unwrap_or(glm::Vec2::new(0., 0.)),
+        }
+    }
+
     pub fn calculate_light_polygon(
         &mut self,
         position: &PositionComp,
         env_object_query: &Query<&AABBComp, With<EnvironmentObjectComp>>,
     ) -> (Vec<glm::Vec2>, bool) {
-        let collision_circle = Circle {
-            radius: self.max_radius * 1.2,
-            center: position.position.clone(),
-        };
-        // TODO: Fix jitter
+        // Collision circle which is slightly bigger than the light itself
+        let collision_circle = self.get_collision_circle(Some(position.position.clone()));
 
-        // TODO: Improve this!!
+        // TODO: Improve the readability!!
         // See if new polygon has to be calculated
         if let Some(polygon) = &self.polygon {
             if !self.has_moved {
@@ -125,55 +131,40 @@ impl LightComp {
             }
         }
 
-        let mut circle_points = Vec::new();
-
-        // Draw circle
-        let amount_of_points = 10;
-        let angle_diff = PI * 2. / amount_of_points as f32;
-        for i in 0..amount_of_points {
-            let mut angle = angle_diff * i as f32;
-            circle_points.push(glm::Vec2::new(angle.cos(), angle.sin()) * collision_circle.radius);
-        }
-
-        let mut env_objects = Vec::new();
-        let mut actual_points = Vec::new();
+        let mut points_to_add = collision_circle.get_segment_points(10, true);
 
         // Collide with environment objects
+        let mut obstructing_objects = Vec::new();
         self.has_collided = false;
         for env_obj in env_object_query {
             if let Some(coll) = env_obj.circle_collision(&collision_circle) {
                 self.has_collided = true;
-                env_objects.push(env_obj);
+                obstructing_objects.push(env_obj);
 
-                for cp in &coll.collision_points {
-                    // TODO: Check among each other collided env_object
-                    let p_ray =
-                        Ray::new_between_points(collision_circle.center.clone(), cp, Some(1.));
-                    let angle_rays = p_ray.get_angle_rays(None);
-                    for r in angle_rays {
-                        if let None = env_obj.ray_collision(&r, true) {
-                            actual_points.push(r.dir * collision_circle.radius);
+                for point in &coll.collision_points {
+                    let mut point_ray =
+                        Ray::new_between_points(collision_circle.center.clone(), point);
+                    let angle_rays = point_ray.get_angle_rays(None);
+                    for ray in angle_rays {
+                        if let None = env_obj.ray_collision(&ray, true) {
+                            points_to_add.push(ray.get_vector_with_t(collision_circle.radius));
                         } else {
-                            actual_points.push(cp - collision_circle.center);
+                            points_to_add.push(ray.get_vector());
                         }
                     }
                 }
             }
         }
 
+        let mut actual_points = Vec::new();
+
         // Adding circle points that dont collide with object
-        for cp in circle_points {
-            let mut add_circle_point = true;
-            let ray =
-                Ray::new_between_points(position.position.clone(), &(cp + position.position), None);
-            for env_obj in &env_objects {
-                if let Some(_) = env_obj.ray_collision(&ray, false) {
-                    add_circle_point = false;
-                    break;
-                }
-            }
-            if add_circle_point {
-                actual_points.push(cp);
+        for point in points_to_add {
+            let ray = Ray::new_between_points(collision_circle.center.clone(), &(point + collision_circle.center));
+            if let Some(t) = Self::check_if_point_is_obstructed(&ray, &obstructing_objects) {
+                actual_points.push(ray.get_vector_with_t(t));
+            } else {
+                actual_points.push(point)
             }
         }
 
@@ -182,6 +173,26 @@ impl LightComp {
         self.polygon = Some(actual_points);
         self.has_moved = false;
         (polygon_c, true)
+    }
+
+    fn check_if_point_is_obstructed(
+        ray: &Ray,
+        env_objects: &Vec<&AABBComp>,
+    ) -> Option<f32> {
+        let mut add_circle_point = true;
+        let mut min_t = f32::MAX;
+        for env_obj in env_objects {
+            if let Some(coll) = env_obj.ray_collision(&ray, true) {
+                if coll.t < min_t{
+                    min_t = coll.t;
+                }
+            }
+        }
+        if min_t == f32::MAX {
+            None
+        } else {
+            Some(min_t)
+        }
     }
 }
 
@@ -198,8 +209,7 @@ where
     }
 
     pub fn set_buffers(&mut self, vertices: Vec<T>, indices: Vec<u32>, queue: Arc<Queue>) {
-        let (index_buffer, ib_future) = 
-            create_index_buffer(indices, queue.clone());
+        let (index_buffer, ib_future) = create_index_buffer(indices, queue.clone());
 
         let (vertex_buffer, vb_future) =
             ImmutableBuffer::from_iter(vertices, BufferUsage::vertex_buffer(), queue).unwrap();
@@ -221,5 +231,28 @@ where
 
         self.vertex_buffer = Some(vertex_buffer);
         self.index_buffer = Some(index_buffer);
+    }
+}
+
+impl RenderObjectComp<ImageVertex> {
+    pub(crate) fn create_square(&mut self, size: f32, queue: Arc<Queue>) {
+        self.set_buffers(
+            vec![
+                ImageVertex {
+                    position: [-size, -size],
+                },
+                ImageVertex {
+                    position: [-size, size],
+                },
+                ImageVertex {
+                    position: [size, -size],
+                },
+                ImageVertex {
+                    position: [size, size],
+                },
+            ],
+            vec![0, 1, 2, 2, 1, 3],
+            queue,
+        );
     }
 }

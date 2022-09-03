@@ -33,7 +33,7 @@ pub(super) fn insert_render_pass_system(
     let light_render_pipeline = LightRenderPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(light_render_pipeline);
 
-    let image_render_pipeline = ImageRenderPipeline::new(queue, format);
+    let image_render_pipeline = CreatureRenderPipeline::new(queue, format);
     commands.insert_resource(image_render_pipeline);
 }
 
@@ -119,7 +119,7 @@ pub(super) fn light_render_system(
 pub(super) fn creature_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
-    mut image_render_pipeline: ResMut<ImageRenderPipeline>,
+    mut image_render_pipeline: ResMut<CreatureRenderPipeline>,
     image_query: Query<(&RenderObjectComp<ImageVertex>, &PositionComp, &CreatureComp)>,
     mouse_position: Res<MousePosition>,
 ) {

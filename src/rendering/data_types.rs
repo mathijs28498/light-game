@@ -43,7 +43,7 @@ pub struct LightRenderPipeline {
     framebuffers: Vec<Option<Arc<Framebuffer>>>,
 }
 
-pub struct ImageRenderPipeline {
+pub struct CreatureRenderPipeline {
     pub(crate) queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
@@ -241,7 +241,7 @@ impl LightRenderPipeline {
     }
 }
 
-impl ImageRenderPipeline {
+impl CreatureRenderPipeline {
     pub(crate) fn new(queue: Arc<Queue>, image_format: Format) -> Self {
         let render_pass = RenderPass::new(
             queue.device().clone(),
