@@ -6,7 +6,7 @@ use crate::{
         traits::*,
         components::*,
     },
-    ext_traits::glm_traits::{
+    ext::glm_ext::{
         traits::*,
         traits_impl::*,
     },

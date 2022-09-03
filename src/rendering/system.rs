@@ -30,8 +30,11 @@ pub(super) fn insert_render_pass_system(
     let queue = window_renderer.graphics_queue();
     let format = window_renderer.swapchain_format();
 
-    let vulkano_device = VulkanoDevice::new::<LightVertex>(queue, format);
-    commands.insert_resource(vulkano_device);
+    let light_render_pipeline = LightRenderPipeline::new(queue.clone(), format.clone());
+    commands.insert_resource(light_render_pipeline);
+
+    let image_render_pipeline = ImageRenderPipeline::new(queue, format);
+    commands.insert_resource(image_render_pipeline);
 }
 
 pub(super) fn pre_render_setup_system(
@@ -45,14 +48,13 @@ pub(super) fn pre_render_setup_system(
             } else {
                 return;
             };
-        let before = match window_renderer.acquire() {
+        frame_data.after = match window_renderer.acquire() {
             Err(e) => {
                 bevy::log::error!("Failed to start frame: {}", e);
                 None
             }
             Ok(f) => Some(f),
         };
-        frame_data.before = before;
     }
 }
 
@@ -82,17 +84,17 @@ pub(super) fn post_render_system(
                 return;
             };
         if let Some(after) = frame_data.after.take() {
+            let after = after.then_signal_fence_and_flush().unwrap().boxed();
             window_renderer.present(after, false);
         }
     }
 }
 
-pub(super) fn main_render_system(
+pub(super) fn light_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
-    mut vulkano_device: ResMut<VulkanoDevice>,
-    light_query: Query<(&RenderObject<LightVertex>, &PositionComp, &LightComp)>,
-    env_object_query: Query<(&EnvironmentObjectComp, &AABBComp)>,
+    mut light_render_pipeline: ResMut<LightRenderPipeline>,
+    light_query: Query<(&RenderObjectComp<LightVertex>, &PositionComp, &LightComp)>,
     mouse_position: Res<MousePosition>,
 ) {
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
@@ -103,37 +105,45 @@ pub(super) fn main_render_system(
             return;
         };
 
-    // We take the before pipeline future leaving None in its place
-    if let Some(before_future) = frame_data.before.take() {
-        ///////////////////////////////////////
-        // Plan:
-        // 1. Create resource for each pipeline.
-        // 1.1. Each resource contains: pipeline, descriptor sets, pushconstant, queue.
-        //
-        // 2. Create different render objects to populate.
-        //
-        // 3. Create different Queries for different pipeline users.
-        //
-        // 4. Create a commandbuffer and execute the different pipelines in order.
-        ///////////////////////////////////////
+    // Make each render pass its own system with its own stage.
+    // Mutate the future rather than sending it
+    frame_data.after = Some(light_render_pipeline.do_pass(
+        frame_data.after.take().unwrap(),
+        window_renderer.swapchain_image_view(),
+        window_renderer.image_index(),
+        light_query,
+        &mouse_position,
+    ));
+}
 
-        let mut after_future: Box<dyn GpuFuture> = vulkano_device.do_pass(
-            before_future,
-            window_renderer.swapchain_image_view(),
-            light_query,
-            &mouse_position,
-        );
+pub(super) fn creature_render_system(
+    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    mut pipeline_frame_data: ResMut<PipelineSyncData>,
+    mut image_render_pipeline: ResMut<ImageRenderPipeline>,
+    image_query: Query<(&RenderObjectComp<ImageVertex>, &PositionComp, &CreatureComp)>,
+    mouse_position: Res<MousePosition>,
+) {
+    let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
+    let window_renderer =
+        if let Some(window_renderer) = vulkano_windows.get_primary_window_renderer_mut() {
+            window_renderer
+        } else {
+            return;
+        };
 
-        let after_drawing = after_future.then_signal_fence_and_flush().unwrap().boxed();
-        // Update after pipeline future (so post render will know to present frame)
-        frame_data.after = Some(after_drawing);
-    }
+    frame_data.after = Some(image_render_pipeline.do_pass(
+        frame_data.after.take().unwrap(),
+        window_renderer.swapchain_image_view(),
+        window_renderer.image_index(),
+        image_query,
+        &mouse_position,
+    ));
 }
 
 pub(crate) fn update_light_polygons_system(
-    vulkano_device: Res<VulkanoDevice>,
+    light_render_pipeline: Res<LightRenderPipeline>,
     mut light_query: Query<(
-        &mut RenderObject<LightVertex>,
+        &mut RenderObjectComp<LightVertex>,
         &PositionComp,
         &mut LightComp,
     )>,
@@ -155,7 +165,7 @@ pub(crate) fn update_light_polygons_system(
             vertices.push(LightVertex { position: [0., 0.] });
         }
 
-        render_object.update_vertex_buffer(vertices, vulkano_device.queue.clone());
+        render_object.update_vertex_buffer_light(vertices, light_render_pipeline.queue.clone());
 
         // let indices = calculate_indices_polygon(vertices.len() - 1);
     }

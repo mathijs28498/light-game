@@ -3,31 +3,37 @@ pub(crate) mod data_types;
 pub(crate) mod functions;
 pub(crate) mod shader_data_types;
 pub(crate) mod system;
+pub(crate) mod traits;
+pub(crate) mod traits_impl;
 
 use nalgebra_glm as glm;
 
 use rand::Rng;
 
-use bevy_vulkano::VulkanoWinitConfig;
+use bevy_vulkano::{BevyVulkanoWindows, VulkanoWinitConfig};
 use vulkano::device::Features;
 use vulkano_util::context::VulkanoConfig;
 
 use bevy::{
     app::*,
-    ecs::{schedule::*, system::Commands},
+    ecs::{
+        schedule::*,
+        system::{Commands, NonSend, ResMut},
+    },
 };
 
 use crate::{
     environment::components::*,
     general::components::*,
     player::components::*,
-    rendering::{components::*, functions::*, shader_data_types::*, system::*},
+    rendering::{components::*, data_types::*, functions::*, shader_data_types::*, system::*},
 };
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, StageLabel)]
 pub(crate) enum RenderStage {
     RenderStart,
-    Render,
+    RenderLight,
+    RenderCreature,
     RenderFinish,
 }
 
@@ -44,11 +50,16 @@ impl Plugin for RenderPlugin {
             )
             .add_stage_after(
                 RenderStage::RenderStart,
-                RenderStage::Render,
+                RenderStage::RenderLight,
                 SystemStage::single_threaded(),
             )
             .add_stage_after(
-                RenderStage::Render,
+                RenderStage::RenderLight,
+                RenderStage::RenderCreature,
+                SystemStage::single_threaded(),
+            )
+            .add_stage_after(
+                RenderStage::RenderCreature,
                 RenderStage::RenderFinish,
                 SystemStage::single_threaded(),
             )
@@ -58,8 +69,12 @@ impl Plugin for RenderPlugin {
                 SystemSet::new().with_system(pre_render_setup_system),
             )
             .add_system_set_to_stage(
-                RenderStage::Render,
-                SystemSet::new().with_system(main_render_system),
+                RenderStage::RenderLight,
+                SystemSet::new().with_system(light_render_system),
+            )
+            .add_system_set_to_stage(
+                RenderStage::RenderCreature,
+                SystemSet::new().with_system(creature_render_system),
             )
             .add_system_set_to_stage(
                 RenderStage::RenderFinish,
@@ -71,8 +86,34 @@ impl Plugin for RenderPlugin {
 
 // This fn is only used for test purposes
 // TODO: Add scenes/terrain generation module
-fn insert_initial_game_objects_system(mut commands: Commands) {
-    let render_object = RenderObject::<LightVertex>::new();
+fn insert_initial_game_objects_system(
+    mut commands: Commands,
+    vulkano_windows: NonSend<BevyVulkanoWindows>,
+) {
+    let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
+    let queue = window_renderer.graphics_queue();
+
+    let light_render_object = RenderObjectComp::<LightVertex>::new();
+    let mut image_render_object = RenderObjectComp::<ImageVertex>::new();
+    let iro_size = 60.;
+    image_render_object.set_buffers(
+        vec![
+            ImageVertex {
+                position: [-iro_size, -iro_size],
+            },
+            ImageVertex {
+                position: [-iro_size, iro_size],
+            },
+            ImageVertex {
+                position: [iro_size, -iro_size],
+            },
+            ImageVertex {
+                position: [iro_size, iro_size],
+            },
+        ],
+        vec![0, 1, 2, 2, 1, 3],
+        queue,
+    );
 
     commands
         .spawn()
@@ -84,27 +125,37 @@ fn insert_initial_game_objects_system(mut commands: Commands) {
             wanted_velocity: glm::Vec2::new(0., 0.),
             jump_pressed: false,
         })
-        .insert(LightComp::new(glm::Vec3::new(0.1, 0.45, 0.7), 200., 1.5))
+        .insert(LightComp::new(glm::Vec3::new(0.1, 0.45, 0.7), 300., 2.5))
         .insert(PlayerLightComp)
         // .insert(MouseLight)
-        .insert(render_object);
+        .insert(light_render_object)
+        .insert(image_render_object.clone())
+        .insert(CreatureComp{color: glm::Vec3::new(0.1, 0.8, 0.4)});
 
-    // generate_random_lights(&mut commands, 1000);
+    commands
+        .spawn()
+        .insert(image_render_object)
+        .insert(PositionComp {
+            position: glm::Vec2::new(400., 500.),
+        })
+        .insert(CreatureComp{color: glm::Vec3::new(0.8, 0.3, 0.4)});
+
+    // generate_random_lights(&mut commands, 10);
     generate_random_aabbs(&mut commands, 0);
 
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(100., 530.),
-            glm::Vec2::new(300., 550.),
+            glm::Vec2::new(100., 570.),
+            glm::Vec2::new(300., 590.),
         ))
         .insert(EnvironmentObjectComp);
 
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(100., 320.),
-            glm::Vec2::new(300., 330.),
+            glm::Vec2::new(100., 100.),
+            glm::Vec2::new(300., 230.),
         ))
         .insert(EnvironmentObjectComp);
 
@@ -196,7 +247,7 @@ pub(super) fn generate_random_lights(commands: &mut Commands, amount_of_lights: 
             rng.gen_range(100.0..300.0),
             rng.gen_range(0.2..0.8),
         );
-        let render_object = RenderObject::<LightVertex>::new();
+        let render_object = RenderObjectComp::<LightVertex>::new();
         commands
             .spawn()
             .insert(light)

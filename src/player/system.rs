@@ -71,7 +71,7 @@ pub(super) fn mouse_event_system(
                     100.,
                     3.,
                 ))
-                .insert(RenderObject::<LightVertex>::new())
+                .insert(RenderObjectComp::<LightVertex>::new())
                 .insert(VelocityComp {
                     velocity: dir * 350.,
                     wanted_velocity: dir * 350.,

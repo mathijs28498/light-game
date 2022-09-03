@@ -61,11 +61,10 @@ use nalgebra_glm as glm;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
-pub struct VertexTest {
+pub struct ImageVertex {
     pub position: [f32; 2],
-    pub color: [f32; 3],
 }
-impl_vertex!(VertexTest, position, color);
+impl_vertex!(ImageVertex, position);
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
@@ -74,10 +73,9 @@ pub struct LightVertex {
 }
 impl_vertex!(LightVertex, position);
 
-// Make pub(super)
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct PushConstants {
+pub(super) struct LightPushConstants {
     pub(super) mouse_pos: glm::Vec2,
     pub(super) resolution: [f32; 2],
     pub(super) time_passed: f32,
@@ -85,4 +83,10 @@ pub(super) struct PushConstants {
     pub(super) light_center: glm::Vec2,
     pub(super) light_color: glm::Vec3,
     pub(super) light_brightness: f32,
+}
+
+pub(super) struct ImagePushConstants {
+    pub(super) resolution: [f32; 2],
+    pub(super) model_center: glm::Vec2,
+    pub(super) model_color: glm::Vec3,
 }

@@ -30,8 +30,13 @@ pub struct LightComp {
     has_collided: bool,
 }
 
-#[derive(Component)]
-pub struct RenderObject<T>
+#[derive(Debug, Component)]
+pub struct CreatureComp {
+    pub color: glm::Vec3
+}
+
+#[derive(Component, Clone)]
+pub struct RenderObjectComp<T>
 where
     T: Zeroable + Pod,
     [T]: BufferContents,
@@ -94,7 +99,7 @@ impl LightComp {
         env_object_query: &Query<&AABBComp, With<EnvironmentObjectComp>>,
     ) -> (Vec<glm::Vec2>, bool) {
         let collision_circle = Circle {
-            radius: self.max_radius * 1.05,
+            radius: self.max_radius * 1.2,
             center: position.position.clone(),
         };
         // TODO: Fix jitter
@@ -180,7 +185,7 @@ impl LightComp {
     }
 }
 
-impl<T> RenderObject<T>
+impl<T> RenderObjectComp<T>
 where
     T: Zeroable + Pod,
     [T]: BufferContents,
@@ -192,7 +197,20 @@ where
         }
     }
 
-    pub fn update_vertex_buffer(&mut self, vertices: Vec<T>, queue: Arc<Queue>) {
+    pub fn set_buffers(&mut self, vertices: Vec<T>, indices: Vec<u32>, queue: Arc<Queue>) {
+        let (index_buffer, ib_future) = 
+            create_index_buffer(indices, queue.clone());
+
+        let (vertex_buffer, vb_future) =
+            ImmutableBuffer::from_iter(vertices, BufferUsage::vertex_buffer(), queue).unwrap();
+
+        // TODO: Await futures!!
+
+        self.vertex_buffer = Some(vertex_buffer);
+        self.index_buffer = Some(index_buffer);
+    }
+
+    pub fn update_vertex_buffer_light(&mut self, vertices: Vec<T>, queue: Arc<Queue>) {
         let (index_buffer, ib_future) = calculate_index_buffer_polygon(&queue, vertices.len());
 
         let (vertex_buffer, vb_future) =

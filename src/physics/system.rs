@@ -21,7 +21,7 @@ pub(crate) fn player_input_system(
     let speed_mult = 300.;
     let (mut velocity, mut position) = player_query.single_mut();
     let mut velocity_vec = glm::Vec2::new(0., 0.);
-    velocity_vec += glm::Vec2::new(0., 0.05);
+    velocity_vec += glm::Vec2::new(0., 0.01);
 
     let ray = Ray::new(position.position.clone(), velocity_vec.normalize(), 50.);
     let mut grounded = false;
@@ -72,7 +72,7 @@ pub(crate) fn solve_position(
             light.has_moved = true;
             let mut wv = velocity.wanted_velocity;
             if velocity.jump_pressed {
-                wv -= glm::Vec2::new(0., 1. * 300.);
+                wv -= glm::Vec2::new(0., 1. * 500.);
                 velocity.jump_pressed = false;
             }
             velocity.velocity = wv;
