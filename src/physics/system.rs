@@ -75,7 +75,6 @@ pub(crate) fn solve_position(
             light.has_moved = true;
             let mut wv = velocity.wanted_velocity;
             if velocity.jump_pressed {
-                // wv -= glm::Vec2::new(0., 1. * 500.);
                 velocity.jump_pressed = false;
             }
             velocity.velocity = wv;
