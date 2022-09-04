@@ -19,7 +19,7 @@ use crate::{
     rendering::functions::*, physics::data_types::Collision,
 };
 
-use super::shader_data_types::ImageVertex;
+use super::shader_data_types::CreatureVertex;
 
 #[derive(Debug, Component)]
 pub struct LightComp {
@@ -234,21 +234,23 @@ where
     }
 }
 
-impl RenderObjectComp<ImageVertex> {
-    pub(crate) fn create_square(&mut self, size: f32, queue: Arc<Queue>) {
+impl RenderObjectComp<CreatureVertex> {
+    pub(crate) fn create_aabb(&mut self, width: f32, height: f32, queue: Arc<Queue>) {
+        let half_width = width * 0.5;
+        let half_height = height * 0.5;
         self.set_buffers(
             vec![
-                ImageVertex {
-                    position: [-size, -size],
+                CreatureVertex {
+                    position: [-half_width, -half_height],
                 },
-                ImageVertex {
-                    position: [-size, size],
+                CreatureVertex {
+                    position: [-half_width, half_height],
                 },
-                ImageVertex {
-                    position: [size, -size],
+                CreatureVertex {
+                    position: [half_width, -half_height],
                 },
-                ImageVertex {
-                    position: [size, size],
+                CreatureVertex {
+                    position: [half_width, half_height],
                 },
             ],
             vec![0, 1, 2, 2, 1, 3],

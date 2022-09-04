@@ -306,7 +306,7 @@ impl CreatureRenderPipeline {
 
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .vertex_input_state(BuffersDefinition::new().vertex::<ImageVertex>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<CreatureVertex>())
             .input_assembly_state(InputAssemblyState::new())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
@@ -328,7 +328,7 @@ impl CreatureRenderPipeline {
         before_future: F,
         image: Arc<dyn ImageViewAbstract + 'static>,
         image_index: usize,
-        image_query: Query<(&RenderObjectComp<ImageVertex>, &PositionComp, &CreatureComp)>,
+        image_query: Query<(&RenderObjectComp<CreatureVertex>, &PositionComp, &CreatureComp)>,
         mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
     where
@@ -393,7 +393,7 @@ impl CreatureRenderPipeline {
                     .push_constants(
                         self.pipeline.layout().clone(),
                         0,
-                        ImagePushConstants {
+                        CreaturePushConstants {
                             resolution: [dims[0] as f32, dims[1] as f32],
                             model_center: position.position.clone(),
                             model_color: creature.color.clone(),

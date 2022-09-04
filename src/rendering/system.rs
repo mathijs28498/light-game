@@ -120,7 +120,7 @@ pub(super) fn creature_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut image_render_pipeline: ResMut<CreatureRenderPipeline>,
-    image_query: Query<(&RenderObjectComp<ImageVertex>, &PositionComp, &CreatureComp)>,
+    image_query: Query<(&RenderObjectComp<CreatureVertex>, &PositionComp, &CreatureComp)>,
     mouse_position: Res<MousePosition>,
 ) {
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();

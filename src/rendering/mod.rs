@@ -84,14 +84,15 @@ impl Plugin for RenderPlugin {
                 SystemSet::new().with_system(post_render_system),
             )
             .add_system(update_light_polygons_system)
-            .add_system(regenerate_light_system);
+            .add_system(insert_aabb_render_object_system)
+            .add_system(regenerate_random_lights_system);
     }
 }
 
 #[derive(Component)]
 pub struct RandomLightComp;
 
-fn regenerate_light_system(
+fn regenerate_random_lights_system(
     mut light_query: Query<(&mut PositionComp, &mut LightComp), With<RandomLightComp>>,
     keys: Res<Input<KeyCode>>,
 ) {
@@ -110,6 +111,48 @@ fn regenerate_light_system(
     }
 }
 
+fn insert_aabb_render_object_system(
+    mut commands: Commands,
+    env_objects: Query<
+        (Entity, &AABBComp),
+        (Without<RenderObjectComp<CreatureVertex>>, With<AABBComp>),
+    >,
+    vulkano_windows: NonSend<BevyVulkanoWindows>,
+) {
+    let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
+    let queue = window_renderer.graphics_queue();
+
+    let mut rng = rand::thread_rng();
+    let col_min = 0.;
+    let col_max = 20.;
+
+    for (entity, aabb) in env_objects.iter() {
+        // println!("{:?}", entity.type_name());
+        let mut render_object = RenderObjectComp::<CreatureVertex>::new();
+        let size = aabb.max - aabb.min;
+        render_object.create_aabb(size.x + 4., size.y + 4., queue.clone());
+
+        commands
+            .entity(entity)
+            .insert(PositionComp {
+                position: aabb.center.clone(),
+            })
+            .insert(render_object)
+            .insert(CreatureComp {
+                // color: glm::Vec3::new(
+                //     rng.gen_range(col_min..col_max) - 10.,
+                //     rng.gen_range(col_min..col_max) - 10.,
+                //     rng.gen_range(col_min..col_max) - 10.,
+                // ),
+                color: glm::Vec3::new(
+                    10.,
+                    10.,
+                    10.,
+                ),
+            });
+    }
+}
+
 // This fn is only used for test purposes
 // TODO: Add scenes/terrain generation module
 fn insert_initial_game_objects_system(
@@ -120,8 +163,8 @@ fn insert_initial_game_objects_system(
     let queue = window_renderer.graphics_queue();
 
     let light_render_object = RenderObjectComp::<LightVertex>::new();
-    let mut image_render_object = RenderObjectComp::<ImageVertex>::new();
-    image_render_object.create_square(60., queue.clone());
+    let mut image_render_object = RenderObjectComp::<CreatureVertex>::new();
+    image_render_object.create_aabb(40., 100., queue.clone());
 
     commands
         .spawn()
@@ -165,7 +208,7 @@ pub(super) fn generate_env_objects(commands: &mut Commands) {
         .spawn()
         .insert(AABBComp::new(
             glm::Vec2::new(100., 600.),
-            glm::Vec2::new(700., 620.),
+            glm::Vec2::new(500., 620.),
         ))
         .insert(EnvironmentObjectComp);
 
@@ -224,10 +267,14 @@ pub(super) fn generate_face(
     let mouth_y = eye_y + 50.;
     {
         // Eyes
+
+        let mut rng = rand::thread_rng();
+        let eye_size = 20.;
+        let pupil_size = rng.gen_range(4.0..9.);
         generate_creature(
             commands,
             queue.clone(),
-            10.,
+            20.,
             glm::Vec2::new(center_x - eye_dist, eye_y),
             glm::Vec3::new(0.1, 0.3, 0.7),
         );
@@ -235,7 +282,7 @@ pub(super) fn generate_face(
         generate_creature(
             commands,
             queue.clone(),
-            5.,
+            pupil_size,
             glm::Vec2::new(center_x + eye_dist, eye_y),
             glm::Vec3::new(0., 0., 0.),
         );
@@ -243,7 +290,7 @@ pub(super) fn generate_face(
         generate_creature(
             commands,
             queue.clone(),
-            10.,
+            20.,
             glm::Vec2::new(center_x + eye_dist, eye_y),
             glm::Vec3::new(0.1, 0.3, 0.7),
         );
@@ -251,7 +298,7 @@ pub(super) fn generate_face(
         generate_creature(
             commands,
             queue.clone(),
-            5.,
+            pupil_size,
             glm::Vec2::new(center_x - eye_dist, eye_y),
             glm::Vec3::new(0., 0., 0.),
         );
@@ -260,10 +307,10 @@ pub(super) fn generate_face(
     {
         // Mouth
         let teeth_amount = 10;
-        let teeth_size = 2.5;
+        let teeth_size = 5.;
         let teeth_gap = 2.;
         let left = center_x
-            - (teeth_amount as f32 - 1.) * teeth_size
+            - (teeth_amount as f32 - 1.) * teeth_size * 0.5
             - teeth_gap * (teeth_amount as f32 - 1.) * 0.5;
         for i in 0..teeth_amount {
             generate_creature(
@@ -271,7 +318,7 @@ pub(super) fn generate_face(
                 queue.clone(),
                 teeth_size,
                 glm::Vec2::new(
-                    left + (teeth_size * 2. + teeth_gap) * i as f32,
+                    left + (teeth_size + teeth_gap) * i as f32,
                     mouth_y - teeth_size - teeth_gap * 0.5,
                 ),
                 // glm::Vec3::new(2., 2., 2.),
@@ -283,7 +330,7 @@ pub(super) fn generate_face(
                 queue.clone(),
                 teeth_size,
                 glm::Vec2::new(
-                    left + (teeth_size * 2. + teeth_gap) * i as f32,
+                    left + (teeth_size + teeth_gap) * i as f32,
                     mouth_y + teeth_size + teeth_gap * 0.5,
                 ),
                 // glm::Vec3::new(2., 2., 2.),
@@ -300,8 +347,8 @@ pub(super) fn generate_creature(
     position: glm::Vec2,
     color: glm::Vec3,
 ) {
-    let mut image_render_object = RenderObjectComp::<ImageVertex>::new();
-    image_render_object.create_square(size, queue);
+    let mut image_render_object = RenderObjectComp::<CreatureVertex>::new();
+    image_render_object.create_aabb(size, size, queue);
     commands
         .spawn()
         .insert(image_render_object)
