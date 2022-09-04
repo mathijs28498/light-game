@@ -43,7 +43,7 @@ pub struct LightRenderPipeline {
     framebuffers: Vec<Option<Arc<Framebuffer>>>,
 }
 
-pub struct ImageRenderPipeline {
+pub struct CreatureRenderPipeline {
     pub(crate) queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
@@ -241,7 +241,7 @@ impl LightRenderPipeline {
     }
 }
 
-impl ImageRenderPipeline {
+impl CreatureRenderPipeline {
     pub(crate) fn new(queue: Arc<Queue>, image_format: Format) -> Self {
         let render_pass = RenderPass::new(
             queue.device().clone(),
@@ -306,7 +306,7 @@ impl ImageRenderPipeline {
 
         let pipeline = GraphicsPipeline::start()
             .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .vertex_input_state(BuffersDefinition::new().vertex::<ImageVertex>())
+            .vertex_input_state(BuffersDefinition::new().vertex::<CreatureVertex>())
             .input_assembly_state(InputAssemblyState::new())
             .vertex_shader(vs.entry_point("main").unwrap(), ())
             .viewport_state(ViewportState::viewport_dynamic_scissor_irrelevant())
@@ -328,7 +328,7 @@ impl ImageRenderPipeline {
         before_future: F,
         image: Arc<dyn ImageViewAbstract + 'static>,
         image_index: usize,
-        image_query: Query<(&RenderObjectComp<ImageVertex>, &PositionComp, &CreatureComp)>,
+        image_query: Query<(&RenderObjectComp<CreatureVertex>, &PositionComp, &CreatureComp)>,
         mouse_position: &MousePosition,
     ) -> Box<dyn GpuFuture>
     where
@@ -393,7 +393,7 @@ impl ImageRenderPipeline {
                     .push_constants(
                         self.pipeline.layout().clone(),
                         0,
-                        ImagePushConstants {
+                        CreaturePushConstants {
                             resolution: [dims[0] as f32, dims[1] as f32],
                             model_center: position.position.clone(),
                             model_color: creature.color.clone(),

@@ -50,7 +50,7 @@ impl EnvironmentObject for AABBComp {
             return None;
         }
 
-        Some(Collision::new(t, vec![ray.get_point_from_t(t)]))
+        Some(Collision::new(t, vec![ray.get_point_with_t(t)]))
     }
 
     fn circle_collision(&self, circle: &Circle) -> Option<Collision> {
@@ -94,7 +94,7 @@ impl EnvironmentObject for LineComp {
         if t0 < 0. || t1 < 0. || t1 > 1. || (!ignore_t && t0 > ray.t) {
             return None;
         }
-        Some(Collision::new(t0, vec![ray.get_point_from_t(t0)]))
+        Some(Collision::new(t0, vec![ray.get_point_with_t(t0)]))
     }
 
     fn circle_collision(&self, circle: &Circle) -> Option<Collision> {
