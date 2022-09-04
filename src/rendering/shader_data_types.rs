@@ -83,10 +83,13 @@ pub(super) struct LightPushConstants {
     pub(super) light_center: glm::Vec2,
     pub(super) light_color: glm::Vec3,
     pub(super) light_brightness: f32,
+    pub(super) camera_position: glm::Vec2,
 }
 
 pub(super) struct CreaturePushConstants {
     pub(super) resolution: [f32; 2],
     pub(super) model_center: glm::Vec2,
     pub(super) model_color: glm::Vec3,
+    pub(super) padding: f32,
+    pub(super) camera_position: glm::Vec2,
 }

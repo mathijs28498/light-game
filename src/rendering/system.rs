@@ -92,18 +92,17 @@ pub(super) fn post_render_system(
 
 pub(super) fn light_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    camera: Res<CameraComp>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut light_render_pipeline: ResMut<LightRenderPipeline>,
     light_query: Query<(&RenderObjectComp<LightVertex>, &PositionComp, &LightComp)>,
     mouse_position: Res<MousePosition>,
 ) {
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
-    let window_renderer =
-        if let Some(window_renderer) = vulkano_windows.get_primary_window_renderer_mut() {
-            window_renderer
-        } else {
-            return;
-        };
+    let window_renderer = match vulkano_windows.get_primary_window_renderer_mut() {
+        Some(window_renderer) => window_renderer,
+        None => return,
+    };
 
     // Make each render pass its own system with its own stage.
     // Mutate the future rather than sending it
@@ -113,23 +112,27 @@ pub(super) fn light_render_system(
         window_renderer.image_index(),
         light_query,
         &mouse_position,
+        &camera,
     ));
 }
 
 pub(super) fn creature_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    camera: Res<CameraComp>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut image_render_pipeline: ResMut<CreatureRenderPipeline>,
-    image_query: Query<(&RenderObjectComp<CreatureVertex>, &PositionComp, &CreatureComp)>,
+    image_query: Query<(
+        &RenderObjectComp<CreatureVertex>,
+        &PositionComp,
+        &CreatureComp,
+    )>,
     mouse_position: Res<MousePosition>,
 ) {
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
-    let window_renderer =
-        if let Some(window_renderer) = vulkano_windows.get_primary_window_renderer_mut() {
-            window_renderer
-        } else {
-            return;
-        };
+    let window_renderer = match vulkano_windows.get_primary_window_renderer_mut() {
+        Some(window_renderer) => window_renderer,
+        None => return,
+    };
 
     frame_data.after = Some(image_render_pipeline.do_pass(
         frame_data.after.take().unwrap(),
@@ -137,6 +140,7 @@ pub(super) fn creature_render_system(
         window_renderer.image_index(),
         image_query,
         &mouse_position,
+        &camera,
     ));
 }
 

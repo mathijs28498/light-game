@@ -15,7 +15,7 @@ use rand::Rng;
 
 use bevy_vulkano::BevyVulkanoWindows;
 
-use vulkano::{device::Features, pipeline::compute};
+use vulkano::{device::Features, pipeline::compute, image::ImageAccess};
 use vulkano_util::{context::VulkanoConfig, window::VulkanoWindows};
 
 use nalgebra_glm as glm;
@@ -28,14 +28,15 @@ use crate::{
     environment::components::*,
     general::{components::*, data_types::*},
     player::components::*,
-    rendering::{components::*, shader_data_types::*},
+    rendering::{components::*, data_types::*, shader_data_types::*},
 };
 
 // TODO: Make system on startup for renderobject that gets its queue
-pub(super) fn mouse_event_system(
+pub(super) fn shoot_light_system(
     mut commands: Commands,
     mut mouse_button_input_events: EventReader<MouseButtonInput>,
     mouse_position: Res<MousePosition>,
+    mut camera: ResMut<CameraComp>,
     player_query: Query<(&PositionComp, &LightComp), With<PlayerLightComp>>,
 ) {
     let mp = mouse_position.as_ref();
@@ -51,8 +52,12 @@ pub(super) fn mouse_event_system(
 
     for event in mouse_button_input_events.iter() {
         if event.state == ButtonState::Pressed && event.button == MouseButton::Left {
-            let (player_pos, light) = player_query.single();
-            let dir = (mp.position - player_pos.position).normalize();
+            let (player_pos, light) = match player_query.get_single() {
+                Ok(player) => player,
+                Err(_) => return,
+            };
+
+            let dir = (mp.position + camera.position - player_pos.position).normalize();
             let light_pos = player_pos.position + dir * 50.;
 
             commands
@@ -79,4 +84,26 @@ pub(super) fn mouse_event_system(
                 });
         }
     }
+}
+
+pub(super) fn move_camera_system(
+    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    mut camera: ResMut<CameraComp>,
+    player_query: Query<&PositionComp, With<PlayerLightComp>>,
+) {
+    let player_pos = match player_query.get_single() {
+        Ok(player) => player,
+        Err(_) => return,
+    };
+    let window_renderer = match vulkano_windows.get_primary_window_renderer_mut() {
+        Some(window_renderer) => window_renderer,
+        None => return,
+    };
+
+    // let t = window_renderer.swapchain_image_view();
+    // let t2 = t.image().
+    let dims = window_renderer.swapchain_image_view().image().dimensions().width_height();
+    let camera_offset = glm::Vec2::new(dims[0] as f32, dims[1] as f32) * 0.5;
+
+    camera.position = player_pos.position - camera_offset;
 }
