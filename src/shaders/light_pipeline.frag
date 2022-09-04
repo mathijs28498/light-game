@@ -8,6 +8,7 @@ layout(push_constant) uniform PushConstantData {
     vec2 lightCenter;
     vec3 lightColor;
     float lightBrightness;
+    vec2 cameraPosition;
 } pc;
 
 
@@ -26,7 +27,7 @@ void main() {
 }
 
 vec3 getLightColor(vec3 baseColor, float brightnessFactor, vec2 lightPos, float radius) {
-    float pixelBrightness = map(radius - distance(gl_FragCoord.xy, lightPos), 0., radius, 0., 1.);
+    float pixelBrightness = map(radius - distance(gl_FragCoord.xy, lightPos - pc.cameraPosition), 0., radius, 0., 1.);
     if (pixelBrightness < 0.) {
         pixelBrightness = 0.;
         // pixelBrightness = 1.;

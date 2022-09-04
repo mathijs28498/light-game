@@ -9,6 +9,7 @@ pub(crate) struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
-        app.add_system(mouse_event_system);
+        app.add_system(shoot_light_system)
+            .add_system(move_camera_system);
     }
 }

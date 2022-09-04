@@ -55,7 +55,7 @@ pub(crate) fn player_input_system(
     }
 
     if velocity.jump_pressed {
-        velocity_vec.y = -1.5;
+        velocity_vec.y = -2.5;
     }
     velocity.wanted_velocity = velocity_vec * speed_mult + glm::Vec2::new(0., velocity.velocity.y);
 }

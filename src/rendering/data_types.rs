@@ -29,11 +29,17 @@ use vulkano::{
 
 use bevy::ecs::system::Query;
 
+use nalgebra_glm as glm;
+
 use crate::{
     general::{components::*, data_types::*},
     player::components::*,
     rendering::{components::*, shader_data_types::*},
 };
+
+pub struct CameraComp {
+    pub(crate) position: glm::Vec2,
+}
 
 pub struct LightRenderPipeline {
     pub(crate) queue: Arc<Queue>,
@@ -146,6 +152,7 @@ impl LightRenderPipeline {
         image_index: usize,
         light_query: Query<(&RenderObjectComp<LightVertex>, &PositionComp, &LightComp)>,
         mouse_position: &MousePosition,
+        camera: &CameraComp,
     ) -> Box<dyn GpuFuture>
     where
         F: GpuFuture + 'static,
@@ -223,6 +230,7 @@ impl LightRenderPipeline {
                             light_radius: light.get_radius(),
                             light_center: position.position.clone(),
                             light_color: light.color,
+                            camera_position: camera.position.clone()
                         },
                     )
                     .bind_descriptor_sets(
@@ -330,6 +338,7 @@ impl CreatureRenderPipeline {
         image_index: usize,
         image_query: Query<(&RenderObjectComp<CreatureVertex>, &PositionComp, &CreatureComp)>,
         mouse_position: &MousePosition,
+        camera: &CameraComp,
     ) -> Box<dyn GpuFuture>
     where
         F: GpuFuture + 'static,
@@ -397,6 +406,8 @@ impl CreatureRenderPipeline {
                             resolution: [dims[0] as f32, dims[1] as f32],
                             model_center: position.position.clone(),
                             model_color: creature.color.clone(),
+                            padding: 0.,
+                            camera_position: camera.position.clone(),
                         },
                     )
                     .bind_descriptor_sets(

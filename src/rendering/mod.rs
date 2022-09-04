@@ -44,48 +44,51 @@ pub(crate) struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_startup_system(insert_render_pass_system)
-            .add_startup_system(insert_initial_game_objects_system)
-            .add_stage_after(
-                CoreStage::PostUpdate,
-                RenderStage::RenderStart,
-                SystemStage::single_threaded(),
-            )
-            .add_stage_after(
-                RenderStage::RenderStart,
-                RenderStage::RenderLight,
-                SystemStage::single_threaded(),
-            )
-            .add_stage_after(
-                RenderStage::RenderLight,
-                RenderStage::RenderCreature,
-                SystemStage::single_threaded(),
-            )
-            .add_stage_after(
-                RenderStage::RenderCreature,
-                RenderStage::RenderFinish,
-                SystemStage::single_threaded(),
-            )
-            // Render systems
-            .add_system_set_to_stage(
-                RenderStage::RenderStart,
-                SystemSet::new().with_system(pre_render_setup_system),
-            )
-            .add_system_set_to_stage(
-                RenderStage::RenderLight,
-                SystemSet::new().with_system(light_render_system),
-            )
-            .add_system_set_to_stage(
-                RenderStage::RenderCreature,
-                SystemSet::new().with_system(creature_render_system),
-            )
-            .add_system_set_to_stage(
-                RenderStage::RenderFinish,
-                SystemSet::new().with_system(post_render_system),
-            )
-            .add_system(update_light_polygons_system)
-            .add_system(insert_aabb_render_object_system)
-            .add_system(regenerate_random_lights_system);
+        app.insert_resource(CameraComp {
+            position: glm::Vec2::new(0., 0.),
+        })
+        .add_startup_system(insert_render_pass_system)
+        .add_startup_system(insert_initial_game_objects_system)
+        .add_stage_after(
+            CoreStage::PostUpdate,
+            RenderStage::RenderStart,
+            SystemStage::single_threaded(),
+        )
+        .add_stage_after(
+            RenderStage::RenderStart,
+            RenderStage::RenderLight,
+            SystemStage::single_threaded(),
+        )
+        .add_stage_after(
+            RenderStage::RenderLight,
+            RenderStage::RenderCreature,
+            SystemStage::single_threaded(),
+        )
+        .add_stage_after(
+            RenderStage::RenderCreature,
+            RenderStage::RenderFinish,
+            SystemStage::single_threaded(),
+        )
+        // Render systems
+        .add_system_set_to_stage(
+            RenderStage::RenderStart,
+            SystemSet::new().with_system(pre_render_setup_system),
+        )
+        .add_system_set_to_stage(
+            RenderStage::RenderLight,
+            SystemSet::new().with_system(light_render_system),
+        )
+        .add_system_set_to_stage(
+            RenderStage::RenderCreature,
+            SystemSet::new().with_system(creature_render_system),
+        )
+        .add_system_set_to_stage(
+            RenderStage::RenderFinish,
+            SystemSet::new().with_system(post_render_system),
+        )
+        .add_system(update_light_polygons_system)
+        .add_system(insert_aabb_render_object_system)
+        .add_system(regenerate_random_lights_system);
     }
 }
 
@@ -144,11 +147,7 @@ fn insert_aabb_render_object_system(
                 //     rng.gen_range(col_min..col_max) - 10.,
                 //     rng.gen_range(col_min..col_max) - 10.,
                 // ),
-                color: glm::Vec3::new(
-                    10.,
-                    10.,
-                    10.,
-                ),
+                color: glm::Vec3::new(10., 10., 10.),
             });
     }
 }
@@ -186,11 +185,11 @@ fn insert_initial_game_objects_system(
         });
 
     // generate_random_faces(&mut commands, &queue, 5);
-    generate_face(&mut commands, &queue, 200., 200.);
-    generate_face(&mut commands, &queue, 400., 400.);
-    generate_face(&mut commands, &queue, 500., 100.);
-    generate_face(&mut commands, &queue, 800., 500.);
-    generate_random_lights(&mut commands, 10);
+    // generate_face(&mut commands, &queue, 200., 200.);
+    // generate_face(&mut commands, &queue, 400., 400.);
+    // generate_face(&mut commands, &queue, 500., 100.);
+    // generate_face(&mut commands, &queue, 800., 500.);
+    generate_random_lights(&mut commands, 0);
     generate_random_aabbs(&mut commands, 0);
     generate_env_objects(&mut commands);
 }
