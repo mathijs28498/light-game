@@ -44,7 +44,7 @@ pub(crate) struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(CameraComp {
+        app.insert_resource(CameraRes {
             position: glm::Vec2::new(0., 0.),
         })
         .add_startup_system(insert_render_pass_system)

@@ -36,7 +36,7 @@ pub(super) fn shoot_light_system(
     mut commands: Commands,
     mut mouse_button_input_events: EventReader<MouseButtonInput>,
     mouse_position: Res<MousePosition>,
-    mut camera: ResMut<CameraComp>,
+    mut camera: ResMut<CameraRes>,
     player_query: Query<(&PositionComp, &LightComp), With<PlayerLightComp>>,
 ) {
     let mp = mouse_position.as_ref();
@@ -88,7 +88,7 @@ pub(super) fn shoot_light_system(
 
 pub(super) fn move_camera_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    mut camera: ResMut<CameraComp>,
+    mut camera: ResMut<CameraRes>,
     player_query: Query<&PositionComp, With<PlayerLightComp>>,
 ) {
     let player_pos = match player_query.get_single() {
