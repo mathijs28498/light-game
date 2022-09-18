@@ -5,8 +5,8 @@ use bytemuck::{Pod, Zeroable};
 use vulkano::{
     buffer::{BufferContents, ImmutableBuffer, TypedBufferAccess},
     command_buffer::{
-        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage,
-        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents, CopyImageInfo,
+        AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage, CopyImageInfo,
+        PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents,
     },
     descriptor_set::{DescriptorSetsCollection, PersistentDescriptorSet, WriteDescriptorSet},
     device::Queue,
@@ -31,7 +31,7 @@ use vulkano::{
     sync::GpuFuture,
 };
 
-use bevy::{prelude::*, ecs::system::Query, render::texture::ImageFormat};
+use bevy::{ecs::system::Query, prelude::*, render::texture::ImageFormat};
 
 use nalgebra_glm as glm;
 
@@ -41,16 +41,16 @@ use crate::{
     rendering::{components::*, shader_data_types::*},
 };
 
-use super::data_types::{RenderPassExecutor, CameraRes};
+use super::data_types::*;
 
 // TODO
 // [ ] - Make a resource that contains all images and descriptors
 // [ ] - Make sure that the CreatureRenderPipeline uses the new images
 // [ ] - Make system to draw the lights
 // [ ] - Make bloom system by using multiple images in different resolutions (these don't need to be global)
-// [ ] - 
-// [ ] - 
-// [ ] - 
+// [ ] -
+// [ ] -
+// [ ] -
 
 pub struct ClearFramebufferPipeline {
     pub(crate) queue: Arc<Queue>,
@@ -62,9 +62,7 @@ pub struct LightRenderPipeline {
     pub(crate) queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
-    images: Vec<Arc<AttachmentImage>>,
     descriptor_sets: Vec<Arc<PersistentDescriptorSet>>,
-    framebuffers: Vec<Option<Arc<Framebuffer>>>,
 }
 
 pub struct CreatureRenderPipeline {
@@ -79,8 +77,7 @@ pub struct BloomRenderPipeline {
     pub(crate) queue: Arc<Queue>,
     render_pass: Arc<RenderPass>,
     pipeline: Arc<GraphicsPipeline>,
-    descriptor_sets: Vec<Option<Arc<PersistentDescriptorSet>>>,
-    framebuffers: Vec<Option<Arc<Framebuffer>>>,
+    descriptor_sets: Vec<Arc<PersistentDescriptorSet>>,
 }
 
 impl ClearFramebufferPipeline {
@@ -150,7 +147,12 @@ impl ClearFramebufferPipeline {
 }
 
 impl LightRenderPipeline {
-    pub(crate) fn new(queue: Arc<Queue>, image_format: Format, dims: &[u32; 2]) -> Self {
+    pub(crate) fn new(
+        queue: Arc<Queue>,
+        image_format: Format,
+        dims: &[u32; 2],
+        render_image_container: &RenderImageContainerRes,
+    ) -> Self {
         // TODO: Change to load: DontCare - store: DontCare
         let render_pass = single_pass_renderpass!(
             queue.device().clone(),
@@ -196,47 +198,15 @@ impl LightRenderPipeline {
             .build(queue.device().clone())
             .unwrap();
 
-        let mut images = Vec::new();
-        let mut descriptor_sets = Vec::new();
-
-        for i in 0..3 {
-            let image = AttachmentImage::with_usage(
-                queue.device().clone(),
-                dims.clone(),
-                Format::R8G8B8A8_UNORM,
-                ImageUsage {
-                    storage: true,
-                    transfer_dst: true,
-                    ..ImageUsage::none()
-                },
-            )
-            .unwrap();
-
-            let descriptor_set = PersistentDescriptorSet::new(
-                pipeline.layout().set_layouts()[0].clone(),
-                [WriteDescriptorSet::image_view(
-                    0,
-                    ImageView::new_default(image.clone()).unwrap(),
-                )],
-            )
-            .unwrap();
-
-            images.push(image);
-            descriptor_sets.push(descriptor_set);
-        }
+        let descriptor_sets = render_image_container
+            .light_image_descriptor_sets(&pipeline.layout().set_layouts()[0].clone());
 
         Self {
             queue,
             render_pass,
             pipeline,
-            images,
             descriptor_sets,
-            framebuffers: vec![None, None, None],
         }
-    }
-
-    pub(crate) fn images(&self) -> &Vec<Arc<AttachmentImage>> {
-        &self.images
     }
 
     pub(crate) fn do_pass<F>(
@@ -248,16 +218,21 @@ impl LightRenderPipeline {
         light_query: Query<(&RenderObjectComp<LightVertex>, &PositionComp, &LightComp)>,
         mouse_position: &MousePosition,
         camera: &CameraRes,
+        render_image_container: &Res<RenderImageContainerRes>,
     ) -> Box<dyn GpuFuture>
     where
         F: GpuFuture + 'static,
     {
-        let image = self.images[fb_image_index].clone();
+        let image = render_image_container.light_image(fb_image_index);
         let descriptor_set = self.descriptor_sets[fb_image_index].clone();
-        let framebuffer = Framebuffer::new(self.render_pass.clone(), FramebufferCreateInfo {
-            attachments: vec![final_image],
-            ..Default::default()
-        }).unwrap();
+        let framebuffer = Framebuffer::new(
+            self.render_pass.clone(),
+            FramebufferCreateInfo {
+                attachments: vec![final_image],
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let mut executor = RenderPassExecutor::new(&dims, self.queue.clone());
         let mut builder = executor.command_buffer_builder.as_mut().unwrap();
@@ -265,7 +240,7 @@ impl LightRenderPipeline {
         builder
             .clear_color_image(ClearColorImageInfo {
                 clear_value: ClearColorValue::Float([0.0, 0.0, 0.0, 0.0]),
-                ..ClearColorImageInfo::image(image)
+                ..ClearColorImageInfo::image(image.clone())
             })
             .expect("Failed to clear color image");
 
@@ -499,7 +474,11 @@ impl CreatureRenderPipeline {
 }
 
 impl BloomRenderPipeline {
-    pub(crate) fn new(queue: Arc<Queue>, image_format: Format) -> Self {
+    pub(crate) fn new(
+        queue: Arc<Queue>,
+        image_format: Format,
+        render_image_container: &RenderImageContainerRes,
+    ) -> Self {
         let render_pass = RenderPass::new(
             queue.device().clone(),
             RenderPassCreateInfo {
@@ -571,12 +550,14 @@ impl BloomRenderPipeline {
             .build(queue.device().clone())
             .unwrap();
 
+        let descriptor_sets = render_image_container
+            .light_image_descriptor_sets(&pipeline.layout().set_layouts()[0].clone());
+
         Self {
             queue,
             render_pass,
             pipeline,
-            descriptor_sets: vec![None, None, None],
-            framebuffers: vec![None, None, None],
+            descriptor_sets,
         }
     }
 
@@ -586,61 +567,30 @@ impl BloomRenderPipeline {
         before_future: F,
         swapchain_image: Arc<dyn ImageViewAbstract + 'static>,
         image_index: usize,
-        image_query: Query<(
-            &RenderObjectComp<BloomVertex>,
-            &BloomComp,
-        )>,
+        image_query: Query<(&RenderObjectComp<BloomVertex>, &BloomComp)>,
         camera: &CameraRes,
-        images: &Vec<Arc<AttachmentImage>>
+        render_image_container: &Res<RenderImageContainerRes>,
     ) -> Box<dyn GpuFuture>
     where
         F: GpuFuture + 'static,
     {
         // Get the descriptor set/framebuffer in constructor
         let dims = swapchain_image.image().dimensions().width_height();
-        let image = images[image_index].clone();
+        let image = render_image_container.light_image(image_index);
 
-        let descriptor_set = match &self.descriptor_sets[image_index] {
-            Some(ds) => ds.clone(),
-            None => {
-                let ds = PersistentDescriptorSet::new(
-                    self.pipeline.layout().set_layouts()[0].clone(),
-                    [WriteDescriptorSet::image_view(
-                        0,
-                        ImageView::new_default(image.clone()).unwrap(),
-                    )],
-                )
-                .unwrap();
-                self.descriptor_sets[image_index] = Some(ds.clone());
-                ds
-            }
-        };
+        let descriptor_set = &self.descriptor_sets[image_index];
 
-        let framebuffer = match &self.framebuffers[image_index] {
-            Some(fb) => fb.clone(),
-            None => {
-                let fb = Framebuffer::new(
-                    self.render_pass.clone(),
-                    FramebufferCreateInfo {
-                        attachments: vec![swapchain_image.clone()],
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-                self.framebuffers[image_index] = Some(fb.clone());
-                fb
-            }
-        };
+        let framebuffer = Framebuffer::new(
+            self.render_pass.clone(),
+            FramebufferCreateInfo {
+                attachments: vec![swapchain_image.clone()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let mut executor = RenderPassExecutor::new(&dims, self.queue.clone());
         let mut builder = executor.command_buffer_builder.as_mut().unwrap();
-
-        // builder.copy_image(
-        //     CopyImageInfo::images(
-        //         swapchain_image.image().clone(),
-        //         image.clone(),
-        //     )
-        // ).unwrap();
 
         for (render_object, bloom) in &image_query {
             if let Some(vertex_buffer) = render_object.vertex_buffer.as_ref() {

@@ -8,7 +8,10 @@ use vulkano::{
         AutoCommandBufferBuilder, ClearColorImageInfo, CommandBufferUsage, CopyImageInfo,
         PrimaryAutoCommandBuffer, RenderPassBeginInfo, SubpassContents,
     },
-    descriptor_set::{DescriptorSetsCollection, PersistentDescriptorSet, WriteDescriptorSet},
+    descriptor_set::{
+        layout::DescriptorSetLayout, DescriptorSetsCollection, PersistentDescriptorSet,
+        WriteDescriptorSet,
+    },
     device::Queue,
     format::{ClearColorValue, Format},
     image::{
@@ -45,7 +48,7 @@ pub struct CameraRes {
 }
 
 pub struct RenderImageContainerRes {
-    pub(crate) light_images: Vec<Arc<AttachmentImage>>,
+    light_images: Vec<Arc<AttachmentImage>>,
 }
 
 pub(super) struct RenderPassExecutor {
@@ -70,9 +73,31 @@ impl RenderImageContainerRes {
                 )
                 .unwrap()
             })
-            // .iter()
             .collect();
         Self { light_images }
+    }
+
+    pub(super) fn light_image_descriptor_sets(
+        &self,
+        layout: &Arc<DescriptorSetLayout>,
+    ) -> Vec<Arc<PersistentDescriptorSet>> {
+        self.light_images
+            .iter()
+            .map(|image| {
+                PersistentDescriptorSet::new(
+                    layout.clone(),
+                    [WriteDescriptorSet::image_view(
+                        0,
+                        ImageView::new_default(image.clone()).unwrap(),
+                    )],
+                )
+                .unwrap()
+            })
+            .collect()
+    }
+
+    pub(super) fn light_image(&self, index: usize) -> &Arc<AttachmentImage> {
+        &self.light_images[index]
     }
 }
 

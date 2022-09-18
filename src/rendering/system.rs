@@ -12,7 +12,7 @@ use crate::{
     environment::components::*,
     general::{components::*, data_types::*},
     player::components::*,
-    rendering::{components::*, render_passes::*, functions::*, shader_data_types::*},
+    rendering::{components::*, functions::*, render_passes::*, shader_data_types::*},
 };
 
 use rand::Rng;
@@ -38,15 +38,20 @@ pub(super) fn insert_render_pass_system(
     let clear_framebuffer_pipeline = ClearFramebufferPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(clear_framebuffer_pipeline);
 
-    let light_render_pipeline = LightRenderPipeline::new(queue.clone(), format.clone(), &dims);
+    let light_render_pipeline = LightRenderPipeline::new(
+        queue.clone(),
+        format.clone(),
+        &dims,
+        &render_image_container,
+    );
     commands.insert_resource(light_render_pipeline);
 
     let image_render_pipeline = CreatureRenderPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(image_render_pipeline);
 
-    let bloom_render_pipeline = BloomRenderPipeline::new(queue.clone(), format.clone());
+    let bloom_render_pipeline = BloomRenderPipeline::new(queue.clone(), format.clone(), &render_image_container);
     commands.insert_resource(bloom_render_pipeline);
-    
+
     commands.insert_resource(render_image_container);
 }
 
@@ -117,6 +122,7 @@ pub(super) fn light_render_system(
     mut light_render_pipeline: ResMut<LightRenderPipeline>,
     light_query: Query<(&RenderObjectComp<LightVertex>, &PositionComp, &LightComp)>,
     mouse_position: Res<MousePosition>,
+    render_image_container: Res<RenderImageContainerRes>,
 ) {
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
     let window_renderer = match vulkano_windows.get_primary_window_renderer_mut() {
@@ -134,6 +140,7 @@ pub(super) fn light_render_system(
         light_query,
         &mouse_position,
         &camera,
+        &render_image_container,
     ));
 }
 
@@ -173,6 +180,7 @@ pub(super) fn bloom_render_system(
     light_render_pipeline: Res<LightRenderPipeline>,
     bloom_query: Query<(&RenderObjectComp<BloomVertex>, &BloomComp)>,
     mouse_position: Res<MousePosition>,
+    render_image_container: Res<RenderImageContainerRes>,
 ) {
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
     let window_renderer = match vulkano_windows.get_primary_window_renderer_mut() {
@@ -186,7 +194,7 @@ pub(super) fn bloom_render_system(
         window_renderer.image_index(),
         bloom_query,
         &camera,
-        light_render_pipeline.images(),
+        &render_image_container,
     ));
 }
 
