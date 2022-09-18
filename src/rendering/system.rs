@@ -12,7 +12,7 @@ use crate::{
     environment::components::*,
     general::{components::*, data_types::*},
     player::components::*,
-    rendering::{components::*, data_types::*, functions::*, shader_data_types::*},
+    rendering::{components::*, render_passes::*, functions::*, shader_data_types::*},
 };
 
 use rand::Rng;
@@ -22,6 +22,8 @@ use vulkano::device::Queue;
 
 use nalgebra_glm as glm;
 
+use super::data_types::*;
+
 pub(super) fn insert_render_pass_system(
     mut commands: Commands,
     vulkano_windows: NonSend<BevyVulkanoWindows>,
@@ -30,6 +32,8 @@ pub(super) fn insert_render_pass_system(
     let queue = window_renderer.graphics_queue();
     let format = window_renderer.swapchain_format();
     let dims = window_renderer.swapchain_image_size();
+
+    let render_image_container = RenderImageContainerRes::new(&queue, &dims);
 
     let clear_framebuffer_pipeline = ClearFramebufferPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(clear_framebuffer_pipeline);
@@ -42,6 +46,8 @@ pub(super) fn insert_render_pass_system(
 
     let bloom_render_pipeline = BloomRenderPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(bloom_render_pipeline);
+    
+    commands.insert_resource(render_image_container);
 }
 
 pub(super) fn pre_render_setup_system(

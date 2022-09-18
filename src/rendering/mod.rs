@@ -5,6 +5,7 @@ pub(crate) mod shader_data_types;
 pub(crate) mod system;
 pub(crate) mod traits;
 pub(crate) mod traits_impl;
+pub(crate) mod render_passes;
 
 use std::sync::Arc;
 
