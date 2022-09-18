@@ -4,18 +4,24 @@ layout(set = 0, binding = 0, rgba8) uniform readonly image2D img;
 layout(location = 0) out vec4 f_color;
 
 void main() {
-    // TODO: Add gaussian blur
-    vec4 color = vec4(0.);
-    int xDiff = 2;
-    int yDiff = 2;
+    float PI_2 = 6.28318530718; // Pi*2
+    // TODO: Get resolution xy via pushconstant
+    vec2 resolution = vec2(1280, 720);
 
-    for (int x = -xDiff; x <= xDiff; x++) {
-        for (int y = -yDiff; y <= yDiff; y++) {
-            color += imageLoad(img, ivec2(gl_FragCoord.xy) + ivec2(x, y));
+    // Play around with these values    
+    // GAUSSIAN BLUR SETTINGS {{{
+    float directions = 16.0; // BLUR DIRECTIONS (Default 16.0 - More is better but slower)
+    float quality = 3.0; // BLUR QUALITY (Default 4.0 - More is better but slower)
+    float size = 6.0; // BLUR SIZE (Radius)
+    // GAUSSIAN BLUR SETTINGS }}}
+    
+    vec4 color = imageLoad(img, ivec2(gl_FragCoord.xy));
+    for (float d = 0.0; d < PI_2; d += PI_2 / directions) {
+		for (float i = 1.0 / quality; i <= 1.0; i += 1.0 / quality) {	
+            color += imageLoad(img, ivec2(gl_FragCoord.xy) + ivec2(vec2(cos(d),sin(d)) * size * i) );
         }
     }
-
-    color *= 1. / ((xDiff * 2. + 1.) * (yDiff * 2. + 1.));
-    f_color = color;
-    // f_color = vec4(1.) - color;
+    
+    color *= 1 / (quality * directions - 15.0);
+    f_color =  color;
 }
