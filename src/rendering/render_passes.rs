@@ -150,7 +150,6 @@ impl LightRenderPipeline {
     pub(crate) fn new(
         queue: Arc<Queue>,
         image_format: Format,
-        dims: &[u32; 2],
         render_image_container: &RenderImageContainerRes,
     ) -> Self {
         let render_pass = single_pass_renderpass!(

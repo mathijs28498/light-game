@@ -38,18 +38,15 @@ pub(super) fn insert_render_pass_system(
     let clear_framebuffer_pipeline = ClearFramebufferPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(clear_framebuffer_pipeline);
 
-    let light_render_pipeline = LightRenderPipeline::new(
-        queue.clone(),
-        format.clone(),
-        &dims,
-        &render_image_container,
-    );
+    let light_render_pipeline =
+        LightRenderPipeline::new(queue.clone(), format.clone(), &render_image_container);
     commands.insert_resource(light_render_pipeline);
 
     let image_render_pipeline = CreatureRenderPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(image_render_pipeline);
 
-    let bloom_render_pipeline = BloomRenderPipeline::new(queue.clone(), format.clone(), &render_image_container);
+    let bloom_render_pipeline =
+        BloomRenderPipeline::new(queue.clone(), format.clone(), &render_image_container);
     commands.insert_resource(bloom_render_pipeline);
 
     commands.insert_resource(render_image_container);
@@ -130,8 +127,6 @@ pub(super) fn light_render_system(
         None => return,
     };
 
-    // Make each render pass its own system with its own stage.
-    // Mutate the future rather than sending it
     frame_data.after = Some(light_render_pipeline.do_pass(
         frame_data.after.take().unwrap(),
         window_renderer.image_index(),
