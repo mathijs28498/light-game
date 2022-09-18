@@ -19,7 +19,7 @@ use crate::{
     rendering::functions::*, physics::data_types::Collision,
 };
 
-use super::shader_data_types::CreatureVertex;
+use super::shader_data_types::{CreatureVertex, BloomVertex};
 
 #[derive(Debug, Component)]
 pub struct LightComp {
@@ -35,6 +35,11 @@ pub struct LightComp {
 #[derive(Debug, Component)]
 pub struct CreatureComp {
     pub color: glm::Vec3,
+}
+
+#[derive(Component)]
+pub struct BloomComp {
+
 }
 
 #[derive(Component, Clone)]
@@ -250,6 +255,31 @@ impl RenderObjectComp<CreatureVertex> {
                     position: [half_width, -half_height],
                 },
                 CreatureVertex {
+                    position: [half_width, half_height],
+                },
+            ],
+            vec![0, 1, 2, 2, 1, 3],
+            queue,
+        );
+    }
+}
+
+impl RenderObjectComp<BloomVertex> {
+    pub(crate) fn create_aabb(&mut self, width: f32, height: f32, queue: Arc<Queue>) {
+        let half_width = width * 0.5;
+        let half_height = height * 0.5;
+        self.set_buffers(
+            vec![
+                BloomVertex {
+                    position: [-half_width, -half_height],
+                },
+                BloomVertex {
+                    position: [-half_width, half_height],
+                },
+                BloomVertex {
+                    position: [half_width, -half_height],
+                },
+                BloomVertex {
                     position: [half_width, half_height],
                 },
             ],

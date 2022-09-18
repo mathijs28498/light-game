@@ -36,6 +36,7 @@ use crate::{
 pub(crate) enum RenderStage {
     RenderStart,
     RenderLight,
+    RenderBloom,
     RenderCreature,
     RenderFinish,
 }
@@ -61,6 +62,11 @@ impl Plugin for RenderPlugin {
         )
         .add_stage_after(
             RenderStage::RenderLight,
+            RenderStage::RenderBloom,
+            SystemStage::single_threaded(),
+        )
+        .add_stage_after(
+            RenderStage::RenderBloom,
             RenderStage::RenderCreature,
             SystemStage::single_threaded(),
         )
@@ -77,6 +83,10 @@ impl Plugin for RenderPlugin {
         .add_system_set_to_stage(
             RenderStage::RenderLight,
             SystemSet::new().with_system(light_render_system),
+        )
+        .add_system_set_to_stage(
+            RenderStage::RenderBloom,
+            SystemSet::new().with_system(bloom_render_system),
         )
         .add_system_set_to_stage(
             RenderStage::RenderCreature,
@@ -133,7 +143,7 @@ fn insert_aabb_render_object_system(
         // println!("{:?}", entity.type_name());
         let mut render_object = RenderObjectComp::<CreatureVertex>::new();
         let size = aabb.max - aabb.min;
-        render_object.create_aabb(size.x + 4., size.y + 4., queue.clone());
+        render_object.create_aabb(size.x, size.y, queue.clone());
 
         commands
             .entity(entity)
@@ -183,6 +193,14 @@ fn insert_initial_game_objects_system(
         .insert(CreatureComp {
             color: glm::Vec3::new(0.1, 0.8, 0.4),
         });
+
+    let mut bloom_render_comp = RenderObjectComp::<BloomVertex>::new();
+    bloom_render_comp.create_aabb(-2., 2., queue.clone());
+    
+    commands
+        .spawn()
+        .insert(BloomComp {})
+        .insert(bloom_render_comp);
 
     // generate_random_faces(&mut commands, &queue, 5);
     // generate_face(&mut commands, &queue, 200., 200.);

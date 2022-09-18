@@ -37,8 +37,11 @@ pub(super) fn insert_render_pass_system(
     let light_render_pipeline = LightRenderPipeline::new(queue.clone(), format.clone(), &dims);
     commands.insert_resource(light_render_pipeline);
 
-    let image_render_pipeline = CreatureRenderPipeline::new(queue, format);
+    let image_render_pipeline = CreatureRenderPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(image_render_pipeline);
+
+    let bloom_render_pipeline = BloomRenderPipeline::new(queue.clone(), format.clone());
+    commands.insert_resource(bloom_render_pipeline);
 }
 
 pub(super) fn pre_render_setup_system(
@@ -153,6 +156,31 @@ pub(super) fn creature_render_system(
         image_query,
         &mouse_position,
         &camera,
+    ));
+}
+
+pub(super) fn bloom_render_system(
+    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    camera: Res<CameraRes>,
+    mut pipeline_frame_data: ResMut<PipelineSyncData>,
+    mut bloom_render_pipeline: ResMut<BloomRenderPipeline>,
+    light_render_pipeline: Res<LightRenderPipeline>,
+    bloom_query: Query<(&RenderObjectComp<BloomVertex>, &BloomComp)>,
+    mouse_position: Res<MousePosition>,
+) {
+    let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
+    let window_renderer = match vulkano_windows.get_primary_window_renderer_mut() {
+        Some(window_renderer) => window_renderer,
+        None => return,
+    };
+
+    frame_data.after = Some(bloom_render_pipeline.do_pass(
+        frame_data.after.take().unwrap(),
+        window_renderer.swapchain_image_view(),
+        window_renderer.image_index(),
+        bloom_query,
+        &camera,
+        light_render_pipeline.images(),
     ));
 }
 
