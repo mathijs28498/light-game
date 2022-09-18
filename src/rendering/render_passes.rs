@@ -153,7 +153,6 @@ impl LightRenderPipeline {
         dims: &[u32; 2],
         render_image_container: &RenderImageContainerRes,
     ) -> Self {
-        // TODO: Change to load: DontCare - store: DontCare
         let render_pass = single_pass_renderpass!(
             queue.device().clone(),
             attachments: {
@@ -294,47 +293,20 @@ impl LightRenderPipeline {
 
 impl CreatureRenderPipeline {
     pub(crate) fn new(queue: Arc<Queue>, image_format: Format) -> Self {
-        let render_pass = RenderPass::new(
+        let render_pass = single_pass_renderpass!(
             queue.device().clone(),
-            RenderPassCreateInfo {
-                attachments: vec![AttachmentDescription {
-                    format: Some(image_format),
-                    // We keep the previous contents of the swapchain image unchanged...
-                    load_op: LoadOp::Load,
-                    // ...and store the result.
-                    store_op: StoreOp::Store,
-                    // When acquired, images in the swapchain are in the `Undefined` layout which
-                    // must be transitioned into a different one if you want to use the data. You can
-                    // use any other layout, but `General` is the only one which works for all purposes.
-                    initial_layout: ImageLayout::General,
-                    final_layout: ImageLayout::PresentSrc,
-                    ..Default::default()
-                }],
-                subpasses: vec![SubpassDescription {
-                    color_attachments: vec![Some(AttachmentReference {
-                        attachment: 0,
-                        // The only valid image layouts for color attachments are
-                        // `ColorAttachmentOptimal` and `General`.
-                        layout: ImageLayout::General,
-                        ..Default::default()
-                    })],
-                    input_attachments: vec![Some(AttachmentReference {
-                        attachment: 0,
-                        // The only valid layouts for input attachments are
-                        // `ShaderReadOnlyOptimal` and `General`.
-                        layout: ImageLayout::General,
-                        aspects: ImageAspects {
-                            // We select the color aspect. Not that there is anything else, we will be
-                            // binding a swapchain image.
-                            color: true,
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    })],
-                    ..Default::default()
-                }],
-                ..Default::default()
+            attachments: {
+                color: {
+                    load: Load,
+                    store: Store,
+                    format: image_format,
+                    samples: 1,
+                }
             },
+            pass: {
+                color: [color],
+                depth_stencil: {}
+            }
         )
         .unwrap();
 
@@ -390,7 +362,6 @@ impl CreatureRenderPipeline {
     where
         F: GpuFuture + 'static,
     {
-        // Get the descriptor set/framebuffer in constructor
         let dims = image.image().dimensions().width_height();
 
         let descriptor_set = match &self.descriptor_sets[image_index] {
@@ -409,21 +380,14 @@ impl CreatureRenderPipeline {
             }
         };
 
-        let framebuffer = match &self.framebuffers[image_index] {
-            Some(fb) => fb.clone(),
-            None => {
-                let fb = Framebuffer::new(
-                    self.render_pass.clone(),
-                    FramebufferCreateInfo {
-                        attachments: vec![image.clone()],
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-                self.framebuffers[image_index] = Some(fb.clone());
-                fb
-            }
-        };
+        let framebuffer = Framebuffer::new(
+            self.render_pass.clone(),
+            FramebufferCreateInfo {
+                attachments: vec![image.clone()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
 
         let mut executor = RenderPassExecutor::new(&dims, self.queue.clone());
         let mut builder = executor.command_buffer_builder.as_mut().unwrap();
@@ -479,47 +443,20 @@ impl BloomRenderPipeline {
         image_format: Format,
         render_image_container: &RenderImageContainerRes,
     ) -> Self {
-        let render_pass = RenderPass::new(
+        let render_pass = single_pass_renderpass!(
             queue.device().clone(),
-            RenderPassCreateInfo {
-                attachments: vec![AttachmentDescription {
-                    format: Some(image_format),
-                    // We keep the previous contents of the swapchain image unchanged...
-                    load_op: LoadOp::Load,
-                    // ...and store the result.
-                    store_op: StoreOp::Store,
-                    // When acquired, images in the swapchain are in the `Undefined` layout which
-                    // must be transitioned into a different one if you want to use the data. You can
-                    // use any other layout, but `General` is the only one which works for all purposes.
-                    initial_layout: ImageLayout::General,
-                    final_layout: ImageLayout::PresentSrc,
-                    ..Default::default()
-                }],
-                subpasses: vec![SubpassDescription {
-                    color_attachments: vec![Some(AttachmentReference {
-                        attachment: 0,
-                        // The only valid image layouts for color attachments are
-                        // `ColorAttachmentOptimal` and `General`.
-                        layout: ImageLayout::General,
-                        ..Default::default()
-                    })],
-                    input_attachments: vec![Some(AttachmentReference {
-                        attachment: 0,
-                        // The only valid layouts for input attachments are
-                        // `ShaderReadOnlyOptimal` and `General`.
-                        layout: ImageLayout::General,
-                        aspects: ImageAspects {
-                            // We select the color aspect. Not that there is anything else, we will be
-                            // binding a swapchain image.
-                            color: true,
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    })],
-                    ..Default::default()
-                }],
-                ..Default::default()
+            attachments: {
+                color: {
+                    load: Load,
+                    store: Store,
+                    format: image_format,
+                    samples: 1,
+                }
             },
+            pass: {
+                color: [color],
+                depth_stencil: {}
+            }
         )
         .unwrap();
 

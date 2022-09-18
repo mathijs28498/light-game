@@ -8,10 +8,12 @@ layout(push_constant) uniform PushConstantData {
 } pc;
 
 layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput input_attachment;
+// layout(set = 0, binding = 0, rgba8) uniform image2D image;
 layout(location = 0) out vec4 f_color;
 
 void main() {
     vec4 input_col = subpassLoad(input_attachment);
+    // vec4 input_col = imageLoad(image, ivec2(gl_FragCoord.xy));
 
     f_color = input_col * vec4(pc.modelColor, 1.);
 }

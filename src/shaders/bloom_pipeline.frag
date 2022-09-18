@@ -1,6 +1,6 @@
 #version 450
 
-layout(set = 0, binding = 0, rgba8) uniform readonly image2D img;
+layout(set = 0, binding = 0, rgba8) uniform image2D image;
 layout(location = 0) out vec4 f_color;
 
 void main() {
@@ -15,13 +15,14 @@ void main() {
     float size = 6.0; // BLUR SIZE (Radius)
     // GAUSSIAN BLUR SETTINGS }}}
     
-    vec4 color = imageLoad(img, ivec2(gl_FragCoord.xy));
+    vec4 color = imageLoad(image, ivec2(gl_FragCoord.xy));
     for (float d = 0.0; d < PI_2; d += PI_2 / directions) {
 		for (float i = 1.0 / quality; i <= 1.0; i += 1.0 / quality) {	
-            color += imageLoad(img, ivec2(gl_FragCoord.xy) + ivec2(vec2(cos(d),sin(d)) * size * i) );
+            color += imageLoad(image, ivec2(gl_FragCoord.xy) + ivec2(vec2(cos(d), sin(d)) * size * i) );
         }
     }
     
     color *= 1 / (quality * directions - 15.0);
-    f_color =  color;
+    f_color = color;
+    // imageStore(image, ivec2(gl_FragCoord.xy), f_color);
 }
