@@ -74,6 +74,13 @@ pub struct LightVertex {
 impl_vertex!(LightVertex, position);
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+pub struct BloomVertex {
+    pub position: [f32; 2],
+}
+impl_vertex!(BloomVertex, position);
+
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct LightPushConstants {
     pub(super) mouse_pos: glm::Vec2,

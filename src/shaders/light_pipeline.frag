@@ -11,19 +11,19 @@ layout(push_constant) uniform PushConstantData {
     vec2 cameraPosition;
 } pc;
 
-
-layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput input_attachment;
+layout(set = 0, binding = 0, rgba8) uniform image2D image;
 layout(location = 0) out vec4 f_color;
 
 float map(float value, float min1, float max1, float min2, float max2);
 vec3 getLightColor(vec3 baseColor, float brightnessFactor, vec2 lightPos, float radius);
 
 void main() {
-    vec4 input_col = subpassLoad(input_attachment);
+    vec4 input_col = imageLoad(image, ivec2(gl_FragCoord.xy));
     
     vec3 col = getLightColor(pc.lightColor, pc.lightBrightness, pc.lightCenter, pc.lightRadius);
     
     f_color = input_col + vec4(col, 1.);
+    imageStore(image, ivec2(gl_FragCoord.xy), f_color);
 }
 
 vec3 getLightColor(vec3 baseColor, float brightnessFactor, vec2 lightPos, float radius) {

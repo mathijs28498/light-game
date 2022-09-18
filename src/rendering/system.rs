@@ -2,7 +2,7 @@ use bevy::{
     diagnostic::{Diagnostics, FrameTimeDiagnosticsPlugin},
     input::mouse::{self, MouseMotion},
     prelude::*,
-    render::view::window,
+    render::{camera, view::window},
     window::WindowId,
 };
 use bevy_vulkano::{BevyVulkanoWindows, PipelineSyncData};
@@ -12,7 +12,7 @@ use crate::{
     environment::components::*,
     general::{components::*, data_types::*},
     player::components::*,
-    rendering::{components::*, data_types::*, functions::*, shader_data_types::*},
+    rendering::{components::*, functions::*, render_passes::*, shader_data_types::*},
 };
 
 use rand::Rng;
@@ -22,6 +22,8 @@ use vulkano::device::Queue;
 
 use nalgebra_glm as glm;
 
+use super::data_types::*;
+
 pub(super) fn insert_render_pass_system(
     mut commands: Commands,
     vulkano_windows: NonSend<BevyVulkanoWindows>,
@@ -29,17 +31,31 @@ pub(super) fn insert_render_pass_system(
     let window_renderer = vulkano_windows.get_primary_window_renderer().unwrap();
     let queue = window_renderer.graphics_queue();
     let format = window_renderer.swapchain_format();
+    let dims = window_renderer.swapchain_image_size();
 
-    let light_render_pipeline = LightRenderPipeline::new(queue.clone(), format.clone());
+    let render_image_container = RenderImageContainerRes::new(&queue, &dims);
+
+    let clear_framebuffer_pipeline = ClearFramebufferPipeline::new(queue.clone(), format.clone());
+    commands.insert_resource(clear_framebuffer_pipeline);
+
+    let light_render_pipeline =
+        LightRenderPipeline::new(queue.clone(), format.clone(), &render_image_container);
     commands.insert_resource(light_render_pipeline);
 
-    let image_render_pipeline = CreatureRenderPipeline::new(queue, format);
+    let image_render_pipeline = CreatureRenderPipeline::new(queue.clone(), format.clone());
     commands.insert_resource(image_render_pipeline);
+
+    let bloom_render_pipeline =
+        BloomRenderPipeline::new(queue.clone(), format.clone(), &render_image_container);
+    commands.insert_resource(bloom_render_pipeline);
+
+    commands.insert_resource(render_image_container);
 }
 
 pub(super) fn pre_render_setup_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
+    mut clear_framebuffer_pipeline: ResMut<ClearFramebufferPipeline>,
 ) {
     for (window_id, mut frame_data) in pipeline_frame_data.data_per_window.iter_mut() {
         let window_renderer =
@@ -48,13 +64,19 @@ pub(super) fn pre_render_setup_system(
             } else {
                 return;
             };
-        frame_data.after = match window_renderer.acquire() {
+        let mut future = match window_renderer.acquire() {
             Err(e) => {
                 bevy::log::error!("Failed to start frame: {}", e);
                 None
             }
             Ok(f) => Some(f),
         };
+
+        frame_data.after = Some(clear_framebuffer_pipeline.do_pass(
+            future.take().unwrap(),
+            window_renderer.swapchain_image_view(),
+            window_renderer.image_index(),
+        ));
     }
 }
 
@@ -92,11 +114,12 @@ pub(super) fn post_render_system(
 
 pub(super) fn light_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    camera: Res<CameraComp>,
+    camera: Res<CameraRes>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut light_render_pipeline: ResMut<LightRenderPipeline>,
     light_query: Query<(&RenderObjectComp<LightVertex>, &PositionComp, &LightComp)>,
     mouse_position: Res<MousePosition>,
+    render_image_container: Res<RenderImageContainerRes>,
 ) {
     let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
     let window_renderer = match vulkano_windows.get_primary_window_renderer_mut() {
@@ -104,21 +127,21 @@ pub(super) fn light_render_system(
         None => return,
     };
 
-    // Make each render pass its own system with its own stage.
-    // Mutate the future rather than sending it
     frame_data.after = Some(light_render_pipeline.do_pass(
         frame_data.after.take().unwrap(),
-        window_renderer.swapchain_image_view(),
         window_renderer.image_index(),
+        &window_renderer.swapchain_image_size(),
+        window_renderer.swapchain_image_view(),
         light_query,
         &mouse_position,
         &camera,
+        &render_image_container,
     ));
 }
 
 pub(super) fn creature_render_system(
     mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
-    camera: Res<CameraComp>,
+    camera: Res<CameraRes>,
     mut pipeline_frame_data: ResMut<PipelineSyncData>,
     mut image_render_pipeline: ResMut<CreatureRenderPipeline>,
     image_query: Query<(
@@ -141,6 +164,32 @@ pub(super) fn creature_render_system(
         image_query,
         &mouse_position,
         &camera,
+    ));
+}
+
+pub(super) fn bloom_render_system(
+    mut vulkano_windows: NonSendMut<BevyVulkanoWindows>,
+    camera: Res<CameraRes>,
+    mut pipeline_frame_data: ResMut<PipelineSyncData>,
+    mut bloom_render_pipeline: ResMut<BloomRenderPipeline>,
+    light_render_pipeline: Res<LightRenderPipeline>,
+    bloom_query: Query<(&RenderObjectComp<BloomVertex>, &BloomComp)>,
+    mouse_position: Res<MousePosition>,
+    render_image_container: Res<RenderImageContainerRes>,
+) {
+    let mut frame_data = pipeline_frame_data.get_mut(WindowId::primary()).unwrap();
+    let window_renderer = match vulkano_windows.get_primary_window_renderer_mut() {
+        Some(window_renderer) => window_renderer,
+        None => return,
+    };
+
+    frame_data.after = Some(bloom_render_pipeline.do_pass(
+        frame_data.after.take().unwrap(),
+        window_renderer.swapchain_image_view(),
+        window_renderer.image_index(),
+        bloom_query,
+        &camera,
+        &render_image_container,
     ));
 }
 
