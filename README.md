@@ -29,7 +29,7 @@ Fiji is built using standard Rust tooling (`cargo`).
    git clone https://github.com/mathijs28498/light-game/
    ```
 2. Navigate to the project directory.
-3. Run:
+3. Build & Run:
    ```bash
    cargo run --release
    ```
