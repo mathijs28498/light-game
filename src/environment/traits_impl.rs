@@ -64,8 +64,8 @@ impl EnvironmentObject for AABBComp {
             return None;
         }
 
-        let cp0 = glm::Vec2::new(closest_point.x, circle.center.y);
-        let cp1 = glm::Vec2::new(circle.center.x, closest_point.y);
+        let cp0 = glm::vec2(closest_point.x, circle.center.y);
+        let cp1 = glm::vec2(circle.center.x, closest_point.y);
         let mut collision_points: Vec<glm::Vec2> = Vec::new();
 
         if cp0 != circle.center {
@@ -87,7 +87,7 @@ impl EnvironmentObject for LineComp {
     fn ray_collision(&self, ray: &Ray, ignore_t: bool) -> Option<Collision> {
         let v0 = ray.orig - self.p0;
         let v1 = self.p1 - self.p0;
-        let v2 = glm::Vec2::new(-ray.dir.y, ray.dir.x);
+        let v2 = glm::vec2(-ray.dir.y, ray.dir.x);
         let t0 = v1.cross_vec2(&v0) / v1.dot(&v2);
         let t1 = v0.dot(&v2) / v1.dot(&v2);
 

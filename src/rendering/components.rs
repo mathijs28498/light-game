@@ -103,7 +103,7 @@ impl LightComp {
     fn get_collision_circle(&self, position: Option<glm::Vec2>) -> Circle {
         Circle {
             radius: self.max_radius * 1.1,
-            center: position.unwrap_or(glm::Vec2::new(0., 0.)),
+            center: position.unwrap_or(glm::vec2(0., 0.)),
         }
     }
 
@@ -173,7 +173,7 @@ impl LightComp {
             }
         }
 
-        sort_points_clockwise(&mut actual_points, &glm::Vec2::new(0., 0.));
+        sort_points_clockwise(&mut actual_points, &glm::vec2(0., 0.));
         let polygon_c = actual_points.clone();
         self.polygon = Some(actual_points);
         self.has_moved = false;

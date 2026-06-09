@@ -27,7 +27,7 @@ impl Circle{
         let angle_diff = PI * 2. / amount_of_points as f32;
         for i in 0..amount_of_points {
             let mut angle = angle_diff * i as f32;
-            let mut point = glm::Vec2::new(angle.cos(), angle.sin()) * self.radius;
+            let mut point = glm::vec2(angle.cos(), angle.sin()) * self.radius;
             if !at_origin {
                 point += self.center;
             }
@@ -43,7 +43,7 @@ impl Ray {
         Self {
             orig,
             dir,
-            inv_dir: glm::Vec2::new(1. / dir.x, 1. / dir.y),
+            inv_dir: glm::vec2(1. / dir.x, 1. / dir.y),
             t,
         }
     }
@@ -56,7 +56,7 @@ impl Ray {
     }
 
     pub(crate) fn new_from_angle(orig: glm::Vec2, angle: f32, t: f32) -> Self {
-        Self::new(orig, glm::Vec2::new(angle.cos(), angle.sin()), t)
+        Self::new(orig, glm::vec2(angle.cos(), angle.sin()), t)
     }
 
     pub(crate) fn get_point_with_t(&self, t: f32) -> glm::Vec2 {

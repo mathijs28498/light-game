@@ -29,7 +29,7 @@ pub(crate) struct GeneralPlugin;
 impl Plugin for GeneralPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(MousePosition {
-            position: glm::Vec2::new(0., 0.),
+            position: glm::vec2(0., 0.),
         })
         // Window configs for primary window
         .insert_resource(WindowDescriptor {

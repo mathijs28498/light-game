@@ -6,7 +6,7 @@ use crate::{
 
 impl ExtraGLMVec2Func for glm::Vec2 {
     fn clamp(&self, min: &Self, max: &Self) -> Self {
-        glm::Vec2::new(self.x.clamp(min.x, max.x), self.y.clamp(min.y, max.y))
+        glm::vec2(self.x.clamp(min.x, max.x), self.y.clamp(min.y, max.y))
     }
     
     fn cross_vec2(&self, b: &Self) -> f32 {

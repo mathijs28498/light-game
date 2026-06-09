@@ -20,8 +20,8 @@ pub(crate) fn player_input_system(
 ) {
     let speed_mult = 300.;
     let (mut velocity, mut position) = player_query.single_mut();
-    let mut velocity_vec = glm::Vec2::new(0., 0.);
-    velocity_vec += glm::Vec2::new(0., 0.01);
+    let mut velocity_vec = glm::vec2(0., 0.);
+    velocity_vec += glm::vec2(0., 0.01);
 
     let ray = Ray::new(position.position.clone(), velocity_vec.normalize(), 50.);
     let mut grounded = false;
@@ -32,20 +32,20 @@ pub(crate) fn player_input_system(
             if velocity.velocity.y > 0. {
                 velocity.velocity.y = 0.;
             };
-            velocity_vec = glm::Vec2::new(0., 0.);
+            velocity_vec = glm::vec2(0., 0.);
             break;
         }
     }
 
     if keyboard_input.pressed(KeyCode::A) {
-        velocity_vec -= glm::Vec2::new(1., 0.);
+        velocity_vec -= glm::vec2(1., 0.);
     }
     if keyboard_input.pressed(KeyCode::D) {
-        velocity_vec += glm::Vec2::new(1., 0.);
+        velocity_vec += glm::vec2(1., 0.);
     }
     if keyboard_input.pressed(KeyCode::R) {
-        position.position = glm::Vec2::new(200., 450.);
-        velocity.velocity = glm::Vec2::new(0., 0.);
+        position.position = glm::vec2(200., 450.);
+        velocity.velocity = glm::vec2(0., 0.);
     }
     if keyboard_input.just_pressed(KeyCode::Space) {
         if grounded {
@@ -57,7 +57,7 @@ pub(crate) fn player_input_system(
     if velocity.jump_pressed {
         velocity_vec.y = -2.5;
     }
-    velocity.wanted_velocity = velocity_vec * speed_mult + glm::Vec2::new(0., velocity.velocity.y);
+    velocity.wanted_velocity = velocity_vec * speed_mult + glm::vec2(0., velocity.velocity.y);
 }
 
 pub(crate) fn solve_position(

@@ -237,7 +237,8 @@ impl LightRenderPipeline {
 
         builder
             .clear_color_image(ClearColorImageInfo {
-                clear_value: ClearColorValue::Float([0.01, 0.01, 0.01, 1.0]),
+                // clear_value: ClearColorValue::Float([0.01, 0.01, 0.01, 1.0]),
+                clear_value: ClearColorValue::Float([0., 0., 0., 1.0]),
                 ..ClearColorImageInfo::image(image.clone())
             })
             .expect("Failed to clear color image");

@@ -93,6 +93,8 @@ pub(super) struct LightPushConstants {
     pub(super) camera_position: glm::Vec2,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(super) struct CreaturePushConstants {
     pub(super) resolution: [f32; 2],
     pub(super) model_center: glm::Vec2,

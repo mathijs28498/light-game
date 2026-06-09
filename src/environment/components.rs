@@ -40,8 +40,8 @@ impl AABBComp {
         AABBComp {
             min,
             max,
-            xminymax: glm::Vec2::new(min.x, max.y),
-            xmaxymin: glm::Vec2::new(max.x, min.y),
+            xminymax: glm::vec2(min.x, max.y),
+            xmaxymin: glm::vec2(max.x, min.y),
             center: (max - min) * 0.5 + min,
         }
     }
@@ -50,7 +50,7 @@ impl AABBComp {
         let cp_to_circle = circle.center - cp;
         let a = cp_to_circle.norm();
         let cp_norm = cp_to_circle / a;
-        let perp_cp = glm::Vec2::new(-cp_norm.y, cp_norm.x);
+        let perp_cp = glm::vec2(-cp_norm.y, cp_norm.x);
 
         let alpha = (a / circle.radius).acos();
         let o = alpha.sin() * circle.radius;
@@ -84,7 +84,7 @@ impl DottedLineComp {
             let offset_1 = line_dir * (offset + size);
             lines.push(LineComp::new(p0 + offset_0, p0 + offset_1));
         }
-        lines.push(LineComp::new(p1 - glm::Vec2::new(size, 0.), p1));
+        lines.push(LineComp::new(p1 - glm::vec2(size, 0.), p1));
 
         Self {
             bounding_line: LineComp::new(p0, p1),

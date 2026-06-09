@@ -47,7 +47,7 @@ pub(crate) struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CameraRes {
-            position: glm::Vec2::new(0., 0.),
+            position: glm::vec2(0., 0.),
         })
         .add_startup_system(insert_render_pass_system)
         .add_startup_system(insert_initial_game_objects_system)
@@ -114,13 +114,13 @@ fn regenerate_random_lights_system(
         let mut rng = rand::thread_rng();
         for (mut position, mut light) in light_query.iter_mut() {
             position.position =
-                glm::Vec2::new(rng.gen_range(30.0..1250.0), rng.gen_range(30.0..690.0));
+                glm::vec2(rng.gen_range(30.0..1250.0), rng.gen_range(30.0..690.0));
             light.has_moved = true;
         }
     }
     if keys.just_pressed(KeyCode::W) {
         for (mut position, _) in light_query.iter_mut() {
-            position.position = glm::Vec2::new(-1000., -1000.);
+            position.position = glm::vec2(-1000., -1000.);
         }
     }
 }
@@ -153,12 +153,12 @@ fn insert_aabb_render_object_system(
             })
             .insert(render_object)
             .insert(CreatureComp {
-                // color: glm::Vec3::new(
+                // color: glm::vec3(
                 //     rng.gen_range(col_min..col_max) - 10.,
                 //     rng.gen_range(col_min..col_max) - 10.,
                 //     rng.gen_range(col_min..col_max) - 10.,
                 // ),
-                color: glm::Vec3::new(10., 10., 10.),
+                color: glm::vec3(10., 10., 10.),
             });
     }
 }
@@ -179,20 +179,20 @@ fn insert_initial_game_objects_system(
     commands
         .spawn()
         .insert(PositionComp {
-            position: glm::Vec2::new(200., 450.),
+            position: glm::vec2(200., 450.),
         })
         .insert(VelocityComp {
-            velocity: glm::Vec2::new(0., 0.),
-            wanted_velocity: glm::Vec2::new(0., 0.),
+            velocity: glm::vec2(0., 0.),
+            wanted_velocity: glm::vec2(0., 0.),
             jump_pressed: false,
         })
-        .insert(LightComp::new(glm::Vec3::new(0.1, 0.45, 0.7), 150., 2.5))
+        .insert(LightComp::new(glm::vec3(0.1, 0.45, 0.7), 150., 2.5))
         .insert(PlayerLightComp)
         // .insert(MouseLight)
         .insert(light_render_object)
         .insert(image_render_object)
         .insert(CreatureComp {
-            color: glm::Vec3::new(0.1, 0.8, 0.4),
+            color: glm::vec3(0.1, 0.8, 0.4),
         });
 
     let mut bloom_render_comp = RenderObjectComp::<BloomVertex>::new();
@@ -204,11 +204,11 @@ fn insert_initial_game_objects_system(
         .insert(bloom_render_comp);
 
     // generate_random_faces(&mut commands, &queue, 5);
-    // generate_face(&mut commands, &queue, 200., 200.);
-    // generate_face(&mut commands, &queue, 400., 400.);
-    // generate_face(&mut commands, &queue, 500., 100.);
-    // generate_face(&mut commands, &queue, 800., 500.);
-    generate_random_lights(&mut commands, 0);
+    generate_face(&mut commands, &queue, 200., 200.);
+    generate_face(&mut commands, &queue, 400., 400.);
+    generate_face(&mut commands, &queue, 500., 100.);
+    generate_face(&mut commands, &queue, 800., 500.);
+    generate_random_lights(&mut commands, 10);
     generate_random_aabbs(&mut commands, 0);
     generate_env_objects(&mut commands);
 }
@@ -217,48 +217,48 @@ pub(super) fn generate_env_objects(commands: &mut Commands) {
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(100., 300.),
-            glm::Vec2::new(600., 330.),
+            glm::vec2(100., 300.),
+            glm::vec2(600., 330.),
         ))
         .insert(EnvironmentObjectComp);
 
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(100., 600.),
-            glm::Vec2::new(500., 620.),
+            glm::vec2(100., 600.),
+            glm::vec2(500., 620.),
         ))
         .insert(EnvironmentObjectComp);
 
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(750., 600.),
-            glm::Vec2::new(900., 640.),
+            glm::vec2(650., 600.),
+            glm::vec2(900., 640.),
         ))
         .insert(EnvironmentObjectComp);
 
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(850., 450.),
-            glm::Vec2::new(900., 460.),
+            glm::vec2(850., 450.),
+            glm::vec2(900., 460.),
         ))
         .insert(EnvironmentObjectComp);
 
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(850., 300.),
-            glm::Vec2::new(900., 310.),
+            glm::vec2(850., 300.),
+            glm::vec2(900., 310.),
         ))
         .insert(EnvironmentObjectComp);
 
     commands
         .spawn()
         .insert(AABBComp::new(
-            glm::Vec2::new(850., 135.),
-            glm::Vec2::new(900., 165.),
+            glm::vec2(850., 135.),
+            glm::vec2(900., 165.),
         ))
         .insert(EnvironmentObjectComp);
 }
@@ -293,32 +293,32 @@ pub(super) fn generate_face(
             commands,
             queue.clone(),
             20.,
-            glm::Vec2::new(center_x - eye_dist, eye_y),
-            glm::Vec3::new(0.1, 0.3, 0.7),
+            glm::vec2(center_x - eye_dist, eye_y),
+            glm::vec3(0.1, 0.3, 0.7),
         );
 
         generate_creature(
             commands,
             queue.clone(),
             pupil_size,
-            glm::Vec2::new(center_x + eye_dist, eye_y),
-            glm::Vec3::new(0., 0., 0.),
+            glm::vec2(center_x + eye_dist, eye_y),
+            glm::vec3(0., 0., 0.),
         );
 
         generate_creature(
             commands,
             queue.clone(),
             20.,
-            glm::Vec2::new(center_x + eye_dist, eye_y),
-            glm::Vec3::new(0.1, 0.3, 0.7),
+            glm::vec2(center_x + eye_dist, eye_y),
+            glm::vec3(0.1, 0.3, 0.7),
         );
 
         generate_creature(
             commands,
             queue.clone(),
             pupil_size,
-            glm::Vec2::new(center_x - eye_dist, eye_y),
-            glm::Vec3::new(0., 0., 0.),
+            glm::vec2(center_x - eye_dist, eye_y),
+            glm::vec3(0., 0., 0.),
         );
     }
 
@@ -335,24 +335,24 @@ pub(super) fn generate_face(
                 commands,
                 queue.clone(),
                 teeth_size,
-                glm::Vec2::new(
+                glm::vec2(
                     left + (teeth_size + teeth_gap) * i as f32,
                     mouth_y - teeth_size - teeth_gap * 0.5,
                 ),
-                // glm::Vec3::new(2., 2., 2.),
-                glm::Vec3::new(2., 0., 0.),
+                // glm::vec3(2., 2., 2.),
+                glm::vec3(2., 0., 0.),
             );
 
             generate_creature(
                 commands,
                 queue.clone(),
                 teeth_size,
-                glm::Vec2::new(
+                glm::vec2(
                     left + (teeth_size + teeth_gap) * i as f32,
                     mouth_y + teeth_size + teeth_gap * 0.5,
                 ),
-                // glm::Vec3::new(2., 2., 2.),
-                glm::Vec3::new(2., 0., 0.),
+                // glm::vec3(2., 2., 2.),
+                glm::vec3(2., 0., 0.),
             );
         }
     }
@@ -381,11 +381,11 @@ pub(super) fn generate_random_aabbs(commands: &mut Commands, amount_of_aabbs: us
 
     let mut rng = rand::thread_rng();
     for i in 0..amount_of_aabbs {
-        let min = glm::Vec2::new(
+        let min = glm::vec2(
             rng.gen_range(offset..1280. - offset - max_size),
             rng.gen_range(offset..720. - offset - max_size),
         );
-        let size = glm::Vec2::new(
+        let size = glm::vec2(
             rng.gen_range(min_size..max_size),
             rng.gen_range(min_size..max_size),
         );
@@ -398,28 +398,28 @@ pub(super) fn generate_random_aabbs(commands: &mut Commands, amount_of_aabbs: us
 
 pub(super) fn generate_random_lights(commands: &mut Commands, amount_of_lights: usize) {
     let colors = vec![
-        glm::Vec3::new(0.85, 0.33, 0.04),
-        glm::Vec3::new(0.23, 0.85, 0.09),
-        glm::Vec3::new(0.85, 0.06, 0.2),
-        glm::Vec3::new(0.09, 0.7, 0.7),
-        glm::Vec3::new(0.85, 0.06, 0.06),
+        glm::vec3(0.85, 0.33, 0.04),
+        glm::vec3(0.23, 0.85, 0.09),
+        glm::vec3(0.85, 0.06, 0.2),
+        glm::vec3(0.09, 0.7, 0.7),
+        glm::vec3(0.85, 0.06, 0.06),
     ];
 
     let positions = vec![
-        glm::Vec2::new(101., 101.),
-        glm::Vec2::new(351., 101.),
-        glm::Vec2::new(701., 101.),
-        glm::Vec2::new(101., 351.),
-        glm::Vec2::new(351., 351.),
-        glm::Vec2::new(701., 351.),
-        glm::Vec2::new(101., 551.),
-        glm::Vec2::new(351., 551.),
-        glm::Vec2::new(701., 551.),
+        glm::vec2(101., 101.),
+        glm::vec2(351., 101.),
+        glm::vec2(701., 101.),
+        glm::vec2(101., 351.),
+        glm::vec2(351., 351.),
+        glm::vec2(701., 351.),
+        glm::vec2(101., 551.),
+        glm::vec2(351., 551.),
+        glm::vec2(701., 551.),
     ];
 
     let mut rng = rand::thread_rng();
     for i in 0..amount_of_lights {
-        let color_offset = glm::Vec3::new(
+        let color_offset = glm::vec3(
             rng.gen_range(0.0..0.2) - 0.1,
             rng.gen_range(0.0..0.2) - 0.1,
             rng.gen_range(0.0..0.2) - 0.1,
@@ -435,7 +435,7 @@ pub(super) fn generate_random_lights(commands: &mut Commands, amount_of_lights: 
             .insert(light)
             .insert(render_object)
             .insert(PositionComp {
-                position: glm::Vec2::new(rng.gen_range(30.0..1250.0), rng.gen_range(30.0..690.0)),
+                position: glm::vec2(rng.gen_range(30.0..1250.0), rng.gen_range(30.0..690.0)),
             })
             .insert(RandomLightComp);
     }
